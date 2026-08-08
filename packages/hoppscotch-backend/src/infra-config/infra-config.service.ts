@@ -32,6 +32,7 @@ import {
   getDefaultInfraConfigs,
   getEncryptionRequiredInfraConfigEntries,
   getMissingInfraConfigEntries,
+  isOidcConfigurationValid,
   stopApp,
   syncInfraConfigWithEnvFile,
 } from './helper';
@@ -171,6 +172,13 @@ export class InfraConfigService implements OnModuleInit, OnModuleDestroy {
    * @returns InfraConfig model
    */
   private cast(dbInfraConfig: DBInfraConfig) {
+    if (dbInfraConfig.name === InfraConfigEnum.OIDC_CLIENT_SECRET) {
+      return <InfraConfig>{
+        name: dbInfraConfig.name,
+        value: '',
+      };
+    }
+
     switch (dbInfraConfig.name) {
       case InfraConfigEnum.USER_HISTORY_STORE_ENABLED:
         dbInfraConfig.value =
@@ -289,7 +297,13 @@ export class InfraConfigService implements OnModuleInit, OnModuleDestroy {
 
       stopApp();
 
-      return E.right(infraConfigs);
+      return E.right(
+        infraConfigs.map((config) =>
+          config.name === InfraConfigEnum.OIDC_CLIENT_SECRET
+            ? { ...config, value: '' }
+            : config,
+        ),
+      );
     } catch (e) {
       return E.left(INFRA_CONFIG_UPDATE_FAILED);
     }
@@ -328,6 +342,8 @@ export class InfraConfigService implements OnModuleInit, OnModuleDestroy {
           configMap.MICROSOFT_SCOPE &&
           configMap.MICROSOFT_TENANT
         );
+      case AuthProvider.OIDC:
+        return isOidcConfigurationValid(configMap);
       case AuthProvider.EMAIL:
         if (configMap.MAILER_SMTP_ENABLE !== 'true') return false;
         if (configMap.MAILER_USE_CUSTOM_CONFIGS === 'true') {
@@ -811,11 +827,25 @@ export class InfraConfigService implements OnModuleInit, OnModuleDestroy {
           if (!value) return fail();
           break;
 
+        case InfraConfigEnum.OIDC_CLIENT_ID:
+        case InfraConfigEnum.OIDC_CLIENT_SECRET:
+          if (!value?.trim()) return fail();
+          break;
+
         case InfraConfigEnum.GOOGLE_CALLBACK_URL:
         case InfraConfigEnum.GITHUB_CALLBACK_URL:
         case InfraConfigEnum.MICROSOFT_CALLBACK_URL:
+        case InfraConfigEnum.OIDC_ISSUER:
+        case InfraConfigEnum.OIDC_CALLBACK_URL:
         case InfraConfigEnum.PROXY_APP_URL:
           if (!validateUrl(value)) return fail();
+          break;
+
+        case InfraConfigEnum.OIDC_SCOPE:
+          if (!value || !value.split(/\s+/).includes('openid')) return fail();
+          break;
+
+        case InfraConfigEnum.OIDC_DISPLAY_NAME:
           break;
 
         case InfraConfigEnum.VITE_ALLOWED_AUTH_PROVIDERS:

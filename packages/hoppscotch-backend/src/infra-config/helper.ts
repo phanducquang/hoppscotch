@@ -3,7 +3,7 @@ import { ENV_INVALID_DATA_ENCRYPTION_KEY } from 'src/errors';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { InfraConfigEnum } from 'src/types/InfraConfig';
 import { SMTPAuthType } from 'src/mailer/helper';
-import { decrypt, encrypt } from 'src/utils';
+import { decrypt, encrypt, validateUrl } from 'src/utils';
 import { randomBytes } from 'crypto';
 import { InfraConfig } from 'src/generated/prisma/client';
 
@@ -12,7 +12,16 @@ export enum ServiceStatus {
   DISABLE = 'DISABLE',
 }
 
-const SYNC_ONLY_VARIABLES = [InfraConfigEnum.PROXY_APP_URL];
+const SYNC_ONLY_VARIABLES = [
+  InfraConfigEnum.PROXY_APP_URL,
+  InfraConfigEnum.OIDC_ISSUER,
+  InfraConfigEnum.OIDC_CLIENT_ID,
+  InfraConfigEnum.OIDC_CLIENT_SECRET,
+  InfraConfigEnum.OIDC_CALLBACK_URL,
+  InfraConfigEnum.OIDC_SCOPE,
+  InfraConfigEnum.OIDC_DISPLAY_NAME,
+  InfraConfigEnum.VITE_ALLOWED_AUTH_PROVIDERS,
+];
 
 type DefaultInfraConfig = {
   name: InfraConfigEnum;
@@ -69,6 +78,13 @@ export function getAuthProviderRequiredKeys(
       InfraConfigEnum.MICROSOFT_SCOPE,
       InfraConfigEnum.MICROSOFT_TENANT,
     ],
+    [AuthProvider.OIDC]: [
+      InfraConfigEnum.OIDC_ISSUER,
+      InfraConfigEnum.OIDC_CLIENT_ID,
+      InfraConfigEnum.OIDC_CLIENT_SECRET,
+      InfraConfigEnum.OIDC_CALLBACK_URL,
+      InfraConfigEnum.OIDC_SCOPE,
+    ],
     [AuthProvider.EMAIL]:
       env['INFRA'].MAILER_USE_CUSTOM_CONFIGS === 'true'
         ? [
@@ -83,6 +99,21 @@ export function getAuthProviderRequiredKeys(
             InfraConfigEnum.MAILER_ADDRESS_FROM,
           ],
   };
+}
+
+/**
+ * Validate the complete Generic OIDC configuration.
+ * OIDC_DISPLAY_NAME is intentionally omitted because it is optional UI text.
+ */
+export function isOidcConfigurationValid(config: Record<string, string>) {
+  return Boolean(
+    validateUrl(config.OIDC_ISSUER) &&
+    config.OIDC_CLIENT_ID?.trim() &&
+    config.OIDC_CLIENT_SECRET?.trim() &&
+    validateUrl(config.OIDC_CALLBACK_URL) &&
+    config.OIDC_SCOPE?.trim() &&
+    config.OIDC_SCOPE.split(/\s+/).includes('openid'),
+  );
 }
 
 /**
@@ -343,8 +374,38 @@ export async function getDefaultInfraConfigs(): Promise<DefaultInfraConfig[]> {
       isEncrypted: false,
     },
     {
+      name: InfraConfigEnum.OIDC_ISSUER,
+      value: process.env.OIDC_ISSUER || null,
+      isEncrypted: false,
+    },
+    {
+      name: InfraConfigEnum.OIDC_CLIENT_ID,
+      value: process.env.OIDC_CLIENT_ID || null,
+      isEncrypted: false,
+    },
+    {
+      name: InfraConfigEnum.OIDC_CLIENT_SECRET,
+      value: encrypt(process.env.OIDC_CLIENT_SECRET),
+      isEncrypted: true,
+    },
+    {
+      name: InfraConfigEnum.OIDC_CALLBACK_URL,
+      value: process.env.OIDC_CALLBACK_URL || null,
+      isEncrypted: false,
+    },
+    {
+      name: InfraConfigEnum.OIDC_SCOPE,
+      value: process.env.OIDC_SCOPE || 'openid profile email',
+      isEncrypted: false,
+    },
+    {
+      name: InfraConfigEnum.OIDC_DISPLAY_NAME,
+      value: process.env.OIDC_DISPLAY_NAME || 'OpenID Connect',
+      isEncrypted: false,
+    },
+    {
       name: InfraConfigEnum.VITE_ALLOWED_AUTH_PROVIDERS,
-      value: null,
+      value: process.env.VITE_ALLOWED_AUTH_PROVIDERS || null,
       isEncrypted: false,
     },
     {
@@ -522,7 +583,14 @@ export async function getConfiguredSSOProvidersFromInfraConfig() {
 
   const configuredAuthProviders = allowedAuthProviders.filter((provider) => {
     const requiredKeys = providerConfigKeys[provider];
-    return requiredKeys?.every((key) => env['INFRA'][key]);
+    const hasRequiredKeys = requiredKeys?.every((key) => env['INFRA'][key]);
+
+    if (!hasRequiredKeys) return false;
+    if (provider === AuthProvider.OIDC) {
+      return isOidcConfigurationValid(env['INFRA']);
+    }
+
+    return true;
   });
 
   if (configuredAuthProviders.length === 0) {

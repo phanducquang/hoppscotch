@@ -16,6 +16,8 @@ import { PubSubService } from 'src/pubsub/pubsub.service';
 import { ServiceStatus } from './helper';
 import * as E from 'fp-ts/Either';
 import { UserService } from 'src/user/user.service';
+import { AuthProvider } from 'src/auth/helper';
+import { decrypt } from 'src/utils';
 
 const mockPrisma = mockDeep<PrismaService>();
 const mockConfigService = mockDeep<ConfigService>();
@@ -66,6 +68,152 @@ beforeEach(() => {
 });
 
 describe('InfraConfigService', () => {
+  describe('OIDC configuration', () => {
+    it('recognizes a complete OIDC service configuration', () => {
+      expect(
+        infraConfigService.isServiceConfigured(AuthProvider.OIDC, {
+          OIDC_ISSUER: 'https://id.example.com/realms/hoppscotch',
+          OIDC_CLIENT_ID: 'hoppscotch',
+          OIDC_CLIENT_SECRET: 'secret',
+          OIDC_CALLBACK_URL: 'https://api.example.com/v1/auth/oidc/callback',
+          OIDC_SCOPE: 'openid profile email',
+        }),
+      ).toBe(true);
+    });
+
+    it.each([
+      ['issuer', 'OIDC_ISSUER'],
+      ['client ID', 'OIDC_CLIENT_ID'],
+      ['client secret', 'OIDC_CLIENT_SECRET'],
+    ])('rejects a missing OIDC %s', (_label, missingKey) => {
+      const config = {
+        OIDC_ISSUER: 'https://id.example.com/realms/hoppscotch',
+        OIDC_CLIENT_ID: 'hoppscotch',
+        OIDC_CLIENT_SECRET: 'secret',
+        OIDC_CALLBACK_URL: 'https://api.example.com/v1/auth/oidc/callback',
+        OIDC_SCOPE: 'openid profile email',
+      };
+      config[missingKey] = '';
+
+      expect(
+        infraConfigService.isServiceConfigured(AuthProvider.OIDC, config),
+      ).toBe(false);
+    });
+
+    it('does not return the OIDC client secret in plaintext', async () => {
+      mockPrisma.infraConfig.findMany.mockResolvedValueOnce([
+        {
+          id: 'oidc-secret',
+          name: InfraConfigEnum.OIDC_CLIENT_SECRET,
+          value: 'plaintext-must-not-be-returned',
+          lastSyncedEnvFileValue: null,
+          isEncrypted: true,
+          createdOn: INITIALIZED_DATE_CONST,
+          updatedOn: INITIALIZED_DATE_CONST,
+        },
+      ]);
+
+      const result = await infraConfigService.getMany([
+        InfraConfigEnum.OIDC_CLIENT_SECRET,
+      ]);
+
+      expect(result).toEqualRight([
+        { name: InfraConfigEnum.OIDC_CLIENT_SECRET, value: '' },
+      ]);
+    });
+
+    it('encrypts the OIDC client secret before persistence', async () => {
+      const encryptionKey = '12345678901234567890123456789012';
+      const previousEncryptionKey = process.env.DATA_ENCRYPTION_KEY;
+      process.env.DATA_ENCRYPTION_KEY = encryptionKey;
+
+      const row = {
+        id: 'oidc-secret',
+        name: InfraConfigEnum.OIDC_CLIENT_SECRET,
+        value: null,
+        lastSyncedEnvFileValue: null,
+        isEncrypted: true,
+        createdOn: INITIALIZED_DATE_CONST,
+        updatedOn: INITIALIZED_DATE_CONST,
+      };
+      mockPrisma.infraConfig.findUnique.mockResolvedValueOnce(row);
+      mockPrisma.infraConfig.update.mockImplementationOnce(async ({ data }) =>
+        Promise.resolve({ ...row, value: data.value as string }),
+      );
+
+      try {
+        const result = await infraConfigService.update(
+          InfraConfigEnum.OIDC_CLIENT_SECRET,
+          'confidential-client-secret',
+        );
+        const persistedValue = mockPrisma.infraConfig.update.mock.calls[0][0]
+          .data.value as string;
+
+        expect(persistedValue).not.toBe('confidential-client-secret');
+        expect(decrypt(persistedValue, encryptionKey)).toBe(
+          'confidential-client-secret',
+        );
+        expect(result).toEqualRight({
+          name: InfraConfigEnum.OIDC_CLIENT_SECRET,
+          value: '',
+        });
+      } finally {
+        if (previousEncryptionKey === undefined) {
+          delete process.env.DATA_ENCRYPTION_KEY;
+        } else {
+          process.env.DATA_ENCRYPTION_KEY = previousEncryptionKey;
+        }
+      }
+    });
+
+    it('redacts the OIDC client secret from update responses', async () => {
+      const encryptionKey = '12345678901234567890123456789012';
+      const previousEncryptionKey = process.env.DATA_ENCRYPTION_KEY;
+      process.env.DATA_ENCRYPTION_KEY = encryptionKey;
+
+      mockPrisma.infraConfig.findMany.mockResolvedValueOnce([
+        {
+          id: 'oidc-secret',
+          name: InfraConfigEnum.OIDC_CLIENT_SECRET,
+          value: null,
+          lastSyncedEnvFileValue: null,
+          isEncrypted: true,
+          createdOn: INITIALIZED_DATE_CONST,
+          updatedOn: INITIALIZED_DATE_CONST,
+        },
+      ]);
+      mockPrisma.$transaction.mockImplementationOnce(async (callback) =>
+        callback(mockPrisma),
+      );
+      jest.spyOn(helper, 'stopApp').mockReturnValueOnce();
+
+      try {
+        const result = await infraConfigService.updateMany([
+          {
+            name: InfraConfigEnum.OIDC_CLIENT_SECRET,
+            value: 'confidential-client-secret',
+          },
+        ]);
+
+        expect(result).toEqualRight([
+          { name: InfraConfigEnum.OIDC_CLIENT_SECRET, value: '' },
+        ]);
+        expect(mockPrisma.infraConfig.update).toHaveBeenCalledWith({
+          where: { name: InfraConfigEnum.OIDC_CLIENT_SECRET },
+          data: {
+            value: expect.not.stringMatching('confidential-client-secret'),
+          },
+        });
+      } finally {
+        if (previousEncryptionKey === undefined) {
+          delete process.env.DATA_ENCRYPTION_KEY;
+        } else {
+          process.env.DATA_ENCRYPTION_KEY = previousEncryptionKey;
+        }
+      }
+    });
+  });
+
   describe('update', () => {
     it('should update the infra config without backend server restart', async () => {
       const name = dbInfraConfigs[0].name;
@@ -356,6 +504,77 @@ describe('InfraConfigService', () => {
   });
 
   describe('validateEnvValues', () => {
+    describe('OIDC', () => {
+      it('accepts valid OIDC values', () => {
+        const result = infraConfigService.validateEnvValues([
+          {
+            name: InfraConfigEnum.OIDC_ISSUER,
+            value: 'https://id.example.com/realms/hoppscotch',
+          },
+          {
+            name: InfraConfigEnum.OIDC_CLIENT_ID,
+            value: 'hoppscotch',
+          },
+          {
+            name: InfraConfigEnum.OIDC_CLIENT_SECRET,
+            value: 'secret',
+          },
+          {
+            name: InfraConfigEnum.OIDC_CALLBACK_URL,
+            value: 'https://api.example.com/v1/auth/oidc/callback',
+          },
+          {
+            name: InfraConfigEnum.OIDC_SCOPE,
+            value: 'openid profile email',
+          },
+          { name: InfraConfigEnum.OIDC_DISPLAY_NAME, value: '' },
+        ]);
+
+        expect(result).toEqualRight(true);
+      });
+
+      it('rejects an invalid issuer', () => {
+        const result = infraConfigService.validateEnvValues([
+          { name: InfraConfigEnum.OIDC_ISSUER, value: 'not-a-url' },
+        ]);
+
+        expect(result).toEqualLeft(INFRA_CONFIG_INVALID_INPUT);
+      });
+
+      it.each([
+        InfraConfigEnum.OIDC_CLIENT_ID,
+        InfraConfigEnum.OIDC_CLIENT_SECRET,
+      ])('rejects an empty %s', (name) => {
+        const result = infraConfigService.validateEnvValues([
+          { name, value: '   ' },
+        ]);
+
+        expect(result).toEqualLeft(INFRA_CONFIG_INVALID_INPUT);
+      });
+
+      it('rejects an OIDC scope without openid', () => {
+        const result = infraConfigService.validateEnvValues([
+          { name: InfraConfigEnum.OIDC_SCOPE, value: 'profile email' },
+        ]);
+
+        expect(result).toEqualLeft(INFRA_CONFIG_INVALID_INPUT);
+      });
+
+      it.each(['OIDC', 'EMAIL,OIDC'])(
+        'accepts %s as an allowed provider value',
+        (value) => {
+          const result = infraConfigService.validateEnvValues([
+            {
+              name: InfraConfigEnum.VITE_ALLOWED_AUTH_PROVIDERS,
+              value,
+            },
+          ]);
+
+          expect(result).toEqualRight(true);
+        },
+      );
+    });
+
     describe('MAILER_SMTP_AUTH_TYPE', () => {
       it('should accept an empty value (defaults to login at runtime)', () => {
         const result = infraConfigService.validateEnvValues([
