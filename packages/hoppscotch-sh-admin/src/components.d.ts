@@ -52,6 +52,7 @@ declare module 'vue' {
     OnboardingAuthSetup: typeof import('./components/onboarding/AuthSetup.vue')['default']
     OnboardingCompleteScreen: typeof import('./components/onboarding/CompleteScreen.vue')['default']
     OnboardingOAuthSetup: typeof import('./components/onboarding/OAuthSetup.vue')['default']
+    OnboardingOidcSetup: typeof import('./components/onboarding/OidcSetup.vue')['default']
     OnboardingSmtpSetup: typeof import('./components/onboarding/SmtpSetup.vue')['default']
     OnboardingWelcomeScreen: typeof import('./components/onboarding/WelcomeScreen.vue')['default']
     SettingsAuthConfigurations: typeof import('./components/settings/AuthConfigurations.vue')['default']

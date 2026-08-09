@@ -228,6 +228,18 @@
       "description_accordian": "Select the OAuth providers you want to enable and provide the necessary configurations.",
       "title": "OAuth"
     },
+    "oidc": {
+      "callback_url": "Callback URL",
+      "client_id": "Client ID",
+      "client_secret": "Client Secret",
+      "client_secret_description": "Stored client secrets are never displayed. Enter the secret again when updating this provider.",
+      "description": "Connect a standards-compliant OpenID Connect provider.",
+      "description_accordion": "Configure OIDC discovery and client credentials.",
+      "display_name": "Display Name",
+      "issuer": "Issuer",
+      "scopes": "Scopes",
+      "title": "OpenID Connect"
+    },
     "onboarding_incomplete": {
       "description": "You have not completed the onboarding process. Please set up at least one authentication provider to continue.",
       "title": "Onboarding Incomplete"

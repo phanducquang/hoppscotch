@@ -7,7 +7,8 @@ import { getLocalConfig, setLocalConfig } from '~/helpers/localpersistence';
 import { makeReadableKey } from '~/helpers/utils/readableKey';
 
 export type OAuthProvider = 'GOOGLE' | 'GITHUB' | 'MICROSOFT';
-export type EnabledConfig = OAuthProvider | 'OAUTH' | 'MAILER' | 'EMAIL';
+export type EnabledConfig =
+  OAuthProvider | 'OIDC' | 'OAUTH' | 'MAILER' | 'EMAIL';
 
 // common OAuth keys used across providers
 type OAuthKeys = 'CLIENT_ID' | 'CLIENT_SECRET' | 'CALLBACK_URL' | 'SCOPE';
@@ -17,6 +18,15 @@ type MicrosoftKeys = OAuthKeys | 'TENANT';
 
 type OAuthConfig<Keys extends string, Prefix extends string> = {
   [K in Keys as `${Prefix}_${K}`]: string;
+};
+
+export type OidcConfig = {
+  OIDC_DISPLAY_NAME: string;
+  OIDC_ISSUER: string;
+  OIDC_CLIENT_ID: string;
+  OIDC_CLIENT_SECRET: string;
+  OIDC_CALLBACK_URL: string;
+  OIDC_SCOPE: string;
 };
 
 // Mailer specific keys
@@ -45,6 +55,7 @@ export type Configs = {
     GITHUB: OAuthConfig<OAuthKeys, 'GITHUB'>;
     MICROSOFT: OAuthConfig<MicrosoftKeys, 'MICROSOFT'>;
   };
+  oidcConfigs: OidcConfig;
   mailerConfigs: {
     [K in `MAILER_${MailerConfigKeys}`]: string;
   };
@@ -80,6 +91,19 @@ function mapOAuthProviders(
       MICROSOFT_SCOPE: configs.MICROSOFT_SCOPE ?? '',
       MICROSOFT_TENANT: configs.MICROSOFT_TENANT ?? '',
     },
+  };
+}
+
+function mapOidcConfigs(
+  configs: Partial<Record<string, string>>,
+): Configs['oidcConfigs'] {
+  return {
+    OIDC_DISPLAY_NAME: configs.OIDC_DISPLAY_NAME ?? 'OpenID Connect',
+    OIDC_ISSUER: configs.OIDC_ISSUER ?? '',
+    OIDC_CLIENT_ID: configs.OIDC_CLIENT_ID ?? '',
+    OIDC_CLIENT_SECRET: '',
+    OIDC_CALLBACK_URL: configs.OIDC_CALLBACK_URL ?? '',
+    OIDC_SCOPE: configs.OIDC_SCOPE ?? 'openid profile email',
   };
 }
 
@@ -134,6 +158,7 @@ export function useOnboardingConfigHandler() {
 
   const currentConfigs = ref<Configs>({
     oAuthProviders: mapOAuthProviders({}),
+    oidcConfigs: mapOidcConfigs({}),
     mailerConfigs: mapMailerConfigs({}),
   });
 
@@ -188,6 +213,10 @@ export function useOnboardingConfigHandler() {
     }
     if (oAuth.MICROSOFT.MICROSOFT_CLIENT_ID) {
       oAuth.MICROSOFT.MICROSOFT_CALLBACK_URL = `${base}/auth/microsoft/callback`;
+    }
+
+    if (!currentConfigs.value.oidcConfigs.OIDC_CALLBACK_URL) {
+      currentConfigs.value.oidcConfigs.OIDC_CALLBACK_URL = `${base}/auth/oidc/callback`;
     }
   };
 
@@ -276,11 +305,11 @@ export function useOnboardingConfigHandler() {
     );
 
     const neededKeys = filterNeededConfigs(relevantKeys);
-    // SMTP auth is optional (both blank = no-auth SMTP server).
-    // These keys are excluded from mandatory "filled" checks, but are still
-    // included in the returned payload even when empty so the backend can
-    // explicitly clear previously stored credentials on re-visits.
-    const optionalSmtpKeys = new Set([
+    // OIDC display name and SMTP auth fields are optional. They are excluded
+    // from mandatory "filled" checks, but remain in the payload when empty so
+    // the backend can apply its fallback or clear previously stored values.
+    const optionalConfigKeys = new Set([
+      'OIDC_DISPLAY_NAME',
       'MAILER_SMTP_USER',
       'MAILER_SMTP_PASSWORD',
       'MAILER_SMTP_OAUTH2_USER',
@@ -290,12 +319,12 @@ export function useOnboardingConfigHandler() {
       'MAILER_SMTP_OAUTH2_ACCESS_URL',
     ]);
     const allFilled = neededKeys.every(
-      (key) => configs[key] || optionalSmtpKeys.has(key),
+      (key) => configs[key] || optionalConfigKeys.has(key),
     );
 
     if (!allFilled) {
       neededKeys.forEach((key) => {
-        if (!configs[key] && !optionalSmtpKeys.has(key))
+        if (!configs[key] && !optionalConfigKeys.has(key))
           toast.error(
             t('onboarding.please_fill_configurations', {
               fieldName: makeReadableKey(key),
@@ -329,7 +358,7 @@ export function useOnboardingConfigHandler() {
       Object.entries(configs).filter(
         ([key, val]) =>
           enabledConfigs.value.includes(key.split('_')[0] as EnabledConfig) &&
-          (val || optionalSmtpKeys.has(key)),
+          (val || optionalConfigKeys.has(key)),
       ),
     );
   };
@@ -347,6 +376,7 @@ export function useOnboardingConfigHandler() {
       ...currentConfigs.value.oAuthProviders.GOOGLE,
       ...currentConfigs.value.oAuthProviders.GITHUB,
       ...currentConfigs.value.oAuthProviders.MICROSOFT,
+      ...currentConfigs.value.oidcConfigs,
       ...currentConfigs.value.mailerConfigs,
     };
 
@@ -419,6 +449,7 @@ export function useOnboardingConfigHandler() {
 
       currentConfigs.value = {
         oAuthProviders: mapOAuthProviders(configs),
+        oidcConfigs: mapOidcConfigs(configs),
         mailerConfigs: mapMailerConfigs(configs),
       };
     } catch (err) {

@@ -481,6 +481,36 @@ describe('InfraConfigService', () => {
 
       updateManySpy.mockRestore();
     });
+
+    it('accepts and persists all OIDC onboarding fields', async () => {
+      const dto = {
+        [InfraConfigEnum.VITE_ALLOWED_AUTH_PROVIDERS]: 'OIDC',
+        [InfraConfigEnum.OIDC_DISPLAY_NAME]: 'Keycloak',
+        [InfraConfigEnum.OIDC_ISSUER]:
+          'https://id.example.com/realms/hoppscotch',
+        [InfraConfigEnum.OIDC_CLIENT_ID]: 'hoppscotch',
+        [InfraConfigEnum.OIDC_CLIENT_SECRET]: 'oidc-secret',
+        [InfraConfigEnum.OIDC_CALLBACK_URL]:
+          'https://api.example.com/v1/auth/oidc/callback',
+        [InfraConfigEnum.OIDC_SCOPE]: 'openid profile email',
+      } as any;
+
+      const updateManySpy = jest
+        .spyOn(infraConfigService, 'updateMany')
+        .mockResolvedValueOnce(E.right([] as any));
+
+      const result = await infraConfigService.updateOnboardingConfig(dto);
+
+      expect(E.isRight(result)).toBe(true);
+      expect(updateManySpy).toHaveBeenCalledWith(
+        expect.arrayContaining(
+          Object.entries(dto).map(([name, value]) => ({ name, value })),
+        ),
+        false,
+      );
+
+      updateManySpy.mockRestore();
+    });
   });
 
   describe('isUserHistoryEnabled', () => {
@@ -659,6 +689,26 @@ describe('InfraConfigService', () => {
         expect(result.right[InfraConfigEnum.GOOGLE_CLIENT_ID]).toBe(
           'google-id',
         );
+      }
+    });
+
+    it('never returns the OIDC client secret in plaintext', async () => {
+      jest.spyOn(infraConfigService, 'getMany').mockResolvedValueOnce(
+        E.right([
+          ...mockConfigs,
+          {
+            name: InfraConfigEnum.OIDC_CLIENT_SECRET,
+            value: 'plaintext-secret',
+          },
+        ]),
+      );
+
+      const result =
+        await infraConfigService.getOnboardingConfig(RECOVERY_TOKEN);
+
+      expect(E.isRight(result)).toBe(true);
+      if (E.isRight(result)) {
+        expect(result.right[InfraConfigEnum.OIDC_CLIENT_SECRET]).toBe('');
       }
     });
 

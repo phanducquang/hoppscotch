@@ -56,6 +56,15 @@
               </AuthProviderCard>
 
               <AuthProviderCard
+                title="onboarding.oidc.title"
+                description="onboarding.oidc.description"
+                :selected="isSelected('OIDC') && isOidcEnabled"
+                @click="toggleSelectedOption('OIDC')"
+              >
+                <IconLucideKeyRound class="h-6 w-6 text-accent" />
+              </AuthProviderCard>
+
+              <AuthProviderCard
                 title="onboarding.smtp.title"
                 description="onboarding.smtp.description"
                 :selected="isSelected('SMTP')"
@@ -95,6 +104,17 @@
                 v-model:enabledConfigs="enabledConfigs"
                 @toggleConfig="toggleConfig"
               />
+            </UiAccordion>
+
+            <UiAccordion
+              v-if="isSelected('OIDC')"
+              :initial-open="isOidcEnabled || isSelected('OIDC')"
+              title="onboarding.oidc.title"
+              description="onboarding.oidc.description_accordion"
+              class="bg-primary rounded-lg border-primaryDark shadow p-4 border flex flex-col"
+              @toggle="toggleConfig('OIDC')"
+            >
+              <OidcSetup v-model:currentConfigs="currentConfigs" />
             </UiAccordion>
 
             <UiAccordion
@@ -158,11 +178,13 @@ import {
 } from '~/composables/useOnboardingConfigHandler';
 
 import OAuthSetup from './OAuthSetup.vue';
+import OidcSetup from './OidcSetup.vue';
 import SmtpSetup from './SmtpSetup.vue';
 
 import IconLucideArrowRight from '~icons/lucide/arrow-right';
 import IconLucideArrowLeft from '~icons/lucide/arrow-left';
 import IconLucideSave from '~icons/lucide/save';
+import IconLucideKeyRound from '~icons/lucide/key-round';
 import AuthProviderCard from './AuthProviderCard.vue';
 
 const t = useI18n();
@@ -176,7 +198,7 @@ const emit = defineEmits<{
   ): void;
 }>();
 
-type SelectedOption = 'OAUTH' | 'SMTP';
+type SelectedOption = 'OAUTH' | 'OIDC' | 'SMTP';
 
 const authConfigStep = ref(1);
 const selectedOptions = ref<SelectedOption[]>([]);
@@ -199,6 +221,7 @@ const OAuthProviders: (OAuthProvider | 'OAUTH')[] = [
   'OAUTH',
 ];
 const isOAuthEnabled = ref(false);
+const isOidcEnabled = computed(() => enabledConfigs.value.includes('OIDC'));
 
 onMounted(() => {
   updateOAuthEnabled();
@@ -226,7 +249,7 @@ watch(
       selectedOptions.value = [];
     } else {
       authConfigStep.value = 2;
-      selectedOptions.value = ['OAUTH', 'SMTP'];
+      selectedOptions.value = ['OAUTH', 'OIDC', 'SMTP'];
     }
   },
   { immediate: true },
@@ -262,6 +285,10 @@ const toggleSelectedOption = (option: SelectedOption) => {
     if (willBeSelected !== isSmtpEnabled.value) {
       toggleConfig('EMAIL');
       toggleSmtpConfig();
+    }
+  } else if (option === 'OIDC') {
+    if (willBeSelected !== isOidcEnabled.value) {
+      toggleConfig('OIDC');
     }
   } else if (willBeSelected !== isOAuthEnabled.value) {
     toggleConfig(option);
