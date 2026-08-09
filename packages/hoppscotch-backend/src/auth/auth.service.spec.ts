@@ -1,7 +1,7 @@
 import { HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Account, VerificationToken } from 'src/generated/prisma/client';
-import { mockDeep } from 'jest-mock-extended';
+import { mockDeep, mockReset } from 'jest-mock-extended';
 import {
   INVALID_EMAIL,
   INVALID_MAGIC_LINK_DATA,
@@ -20,6 +20,8 @@ import { VerifyMagicDto } from './dto/verify-magic.dto';
 import * as E from 'fp-ts/Either';
 import { ConfigService } from '@nestjs/config';
 import { InfraConfigService } from 'src/infra-config/infra-config.service';
+import { OidcIdentity } from './oidc.service';
+import { PrismaError } from 'src/prisma/prisma-error-codes';
 
 const mockPrisma = mockDeep<PrismaService>();
 const mockUser = mockDeep<UserService>();
@@ -422,5 +424,127 @@ describe('verifyAdmin', () => {
 
     const result = await authService.verifyAdmin(user);
     expect(result).toEqualRight({ isAdmin: false });
+  });
+});
+
+describe('resolveOidcUser', () => {
+  const identity: OidcIdentity = {
+    issuer: 'https://id.example.test/realms/hoppscotch',
+    subject: 'stable-provider-subject',
+    email: 'Dwight@DunderMifflin.com',
+    emailVerified: true,
+    name: 'OIDC Dwight',
+    picture: 'https://id.example.test/dwight.png',
+  };
+  const provider = `oidc:${identity.issuer}`;
+
+  beforeEach(() => {
+    mockReset(mockPrisma);
+    mockPrisma.$transaction.mockImplementation(async (callback) =>
+      callback(mockPrisma as never),
+    );
+  });
+
+  test('uses an existing issuer and subject account as the stable identity', async () => {
+    mockPrisma.account.findUnique.mockResolvedValue({
+      ...accountDetails,
+      provider,
+      providerAccountId: identity.subject,
+      user,
+    } as never);
+    mockPrisma.user.update.mockResolvedValue(user);
+
+    await expect(authService.resolveOidcUser(identity)).resolves.toEqual(user);
+    expect(mockPrisma.account.findUnique).toHaveBeenCalledWith({
+      where: {
+        verifyProviderAccount: {
+          provider,
+          providerAccountId: identity.subject,
+        },
+      },
+      include: { user: true },
+    });
+    expect(mockPrisma.user.findFirst).not.toHaveBeenCalled();
+  });
+
+  test('creates a user and account for a new verified-email identity', async () => {
+    mockPrisma.account.findUnique.mockResolvedValue(null);
+    mockPrisma.user.findFirst.mockResolvedValue(null);
+    mockPrisma.user.create.mockResolvedValue(user);
+
+    await expect(authService.resolveOidcUser(identity)).resolves.toEqual(user);
+    expect(mockPrisma.user.create).toHaveBeenCalledWith({
+      data: {
+        email: 'dwight@dundermifflin.com',
+        displayName: identity.name,
+        photoURL: identity.picture,
+        lastLoggedOn: expect.any(Date),
+        providerAccounts: {
+          create: {
+            provider,
+            providerAccountId: identity.subject,
+          },
+        },
+      },
+    });
+  });
+
+  test('links a verified-email identity to an existing user without provider tokens', async () => {
+    mockPrisma.account.findUnique.mockResolvedValue(null);
+    mockPrisma.user.findFirst.mockResolvedValue(user);
+    mockPrisma.account.create.mockResolvedValue(accountDetails);
+    mockPrisma.user.update.mockResolvedValue(user);
+
+    await expect(authService.resolveOidcUser(identity)).resolves.toEqual(user);
+    expect(mockPrisma.account.create).toHaveBeenCalledWith({
+      data: {
+        provider,
+        providerAccountId: identity.subject,
+        user: { connect: { uid: user.uid } },
+      },
+    });
+    const accountData = mockPrisma.account.create.mock.calls[0][0].data;
+    expect(accountData).not.toHaveProperty('providerAccessToken');
+    expect(accountData).not.toHaveProperty('providerRefreshToken');
+  });
+
+  test('does not link an unverified email to an existing user', async () => {
+    mockPrisma.account.findUnique.mockResolvedValue(null);
+
+    await expect(
+      authService.resolveOidcUser({ ...identity, emailVerified: false }),
+    ).rejects.toThrow('OIDC requires a verified email address');
+    expect(mockPrisma.user.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.account.create).not.toHaveBeenCalled();
+  });
+
+  test('rejects automatic provisioning when the email is unavailable', async () => {
+    mockPrisma.account.findUnique.mockResolvedValue(null);
+
+    await expect(
+      authService.resolveOidcUser({
+        ...identity,
+        email: undefined,
+      }),
+    ).rejects.toThrow('OIDC requires a verified email address');
+    expect(mockPrisma.user.create).not.toHaveBeenCalled();
+  });
+
+  test('retries a concurrent first login and reuses the winning account', async () => {
+    mockPrisma.$transaction.mockRejectedValueOnce({
+      code: PrismaError.UNIQUE_CONSTRAINT_VIOLATION,
+    });
+    mockPrisma.account.findUnique.mockResolvedValue({
+      ...accountDetails,
+      provider,
+      providerAccountId: identity.subject,
+      user,
+    } as never);
+    mockPrisma.user.update.mockResolvedValue(user);
+
+    await expect(authService.resolveOidcUser(identity)).resolves.toEqual(user);
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    expect(mockPrisma.account.create).not.toHaveBeenCalled();
   });
 });

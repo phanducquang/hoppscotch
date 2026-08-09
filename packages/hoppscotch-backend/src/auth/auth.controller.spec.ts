@@ -2,6 +2,8 @@ import { ConfigService } from '@nestjs/config';
 import { HttpStatus } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { mockDeep, mockReset } from 'jest-mock-extended';
+import * as E from 'fp-ts/Either';
+import { AuthUser } from 'src/types/AuthUser';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import {
@@ -14,6 +16,9 @@ import {
 const DEFAULT_CONFIG = {
   'INFRA.VITE_ALLOWED_AUTH_PROVIDERS': 'EMAIL,OIDC',
   'INFRA.OIDC_CALLBACK_URL': 'http://api.example.test/v1/auth/oidc/callback',
+  'INFRA.ACCESS_TOKEN_VALIDITY': '86400000',
+  'INFRA.REFRESH_TOKEN_VALIDITY': '604800000',
+  'INFRA.ALLOW_SECURE_COOKIES': 'false',
   WHITELISTED_ORIGINS: 'http://localhost:3000,http://localhost:3100',
   VITE_BASE_URL: 'http://localhost:3000',
   VITE_ADMIN_URL: 'http://localhost:3100',
@@ -39,6 +44,20 @@ const identity: OidcIdentity = {
   emailVerified: true,
 };
 
+const user: AuthUser = {
+  uid: 'hoppscotch-user',
+  email: 'user@example.com',
+  displayName: 'OIDC User',
+  photoURL: null,
+  isAdmin: false,
+  refreshToken: null,
+  lastLoggedOn: new Date(),
+  lastActiveOn: null,
+  createdOn: new Date(),
+  currentGQLSession: null,
+  currentRESTSession: null,
+};
+
 const authService = mockDeep<AuthService>();
 const configService = mockDeep<ConfigService>();
 const oidcService = mockDeep<OidcService>();
@@ -48,6 +67,7 @@ const createResponse = () => {
     redirect: jest.fn(),
     status: jest.fn(),
     send: jest.fn(),
+    cookie: jest.fn(),
   } as unknown as Response;
   (res.redirect as jest.Mock).mockReturnValue(res);
   (res.status as jest.Mock).mockReturnValue(res);
@@ -68,6 +88,13 @@ describe('AuthController OIDC routes', () => {
     );
     oidcService.consumeTransaction.mockReturnValue(transaction);
     oidcService.exchangeAuthorizationCode.mockResolvedValue(identity);
+    authService.resolveOidcUser.mockResolvedValue(user);
+    authService.generateAuthTokens.mockResolvedValue(
+      E.right({
+        access_token: 'hoppscotch-access-token',
+        refresh_token: 'hoppscotch-refresh-token',
+      }),
+    );
     controller = new AuthController(authService, configService, oidcService);
   });
 
@@ -105,7 +132,7 @@ describe('AuthController OIDC routes', () => {
     ).rejects.toMatchObject({ status: 404 });
   });
 
-  it('consumes and validates the callback using the configured callback URL', async () => {
+  it('resolves the identity and creates the existing Hoppscotch session', async () => {
     const res = createResponse();
     const req = {
       originalUrl:
@@ -122,8 +149,22 @@ describe('AuthController OIDC routes', () => {
       ),
       transaction,
     );
-    expect(res.status).toHaveBeenCalledWith(HttpStatus.NO_CONTENT);
-    expect(res.send).toHaveBeenCalled();
+    expect(authService.resolveOidcUser).toHaveBeenCalledWith(identity);
+    expect(authService.generateAuthTokens).toHaveBeenCalledWith(user.uid);
+    expect(res.cookie).toHaveBeenNthCalledWith(
+      1,
+      'access_token',
+      'hoppscotch-access-token',
+      expect.objectContaining({ httpOnly: true, sameSite: 'lax' }),
+    );
+    expect(res.cookie).toHaveBeenNthCalledWith(
+      2,
+      'refresh_token',
+      'hoppscotch-refresh-token',
+      expect.objectContaining({ httpOnly: true, sameSite: 'lax' }),
+    );
+    expect(res.status).toHaveBeenCalledWith(HttpStatus.OK);
+    expect(res.redirect).toHaveBeenCalledWith(transaction.redirectUri);
   });
 
   it('clears the transaction and rejects a callback when OIDC is disabled', async () => {

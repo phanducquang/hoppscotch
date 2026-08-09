@@ -1,4 +1,9 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import {
+  HttpStatus,
+  Injectable,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { MailerService } from 'src/mailer/mailer.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { UserService } from 'src/user/user.service';
@@ -25,10 +30,14 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { RESTError } from 'src/types/RESTError';
 import { AuthUser, IsAdmin } from 'src/types/AuthUser';
-import { VerificationToken } from 'src/generated/prisma/client';
+import { Prisma, VerificationToken } from 'src/generated/prisma/client';
 import { Origin } from './helper';
 import { ConfigService } from '@nestjs/config';
 import { InfraConfigService } from 'src/infra-config/infra-config.service';
+import type { OidcIdentity } from './oidc.service';
+import { PrismaError } from 'src/prisma/prisma-error-codes';
+
+const OIDC_RESOLUTION_MAX_ATTEMPTS = 3;
 
 @Injectable()
 export class AuthService {
@@ -89,7 +98,7 @@ export class AuthService {
         },
       });
       return O.some(tokens);
-    } catch (error) {
+    } catch {
       return O.none;
     }
   }
@@ -170,7 +179,7 @@ export class AuthService {
           },
         });
       return E.right(deletedPasswordlessToken);
-    } catch (error) {
+    } catch {
       return E.left(VERIFICATION_TOKEN_DATA_NOT_FOUND);
     }
   }
@@ -195,6 +204,98 @@ export class AuthService {
     if (!provider) return O.none;
 
     return O.some(provider);
+  }
+
+  /**
+   * Resolve the stable OIDC identity (issuer + subject) to a Hoppscotch user.
+   * New account linking/provisioning requires a verified email. The nested
+   * User/Account writes and Serializable retries prevent first-login races.
+   */
+  async resolveOidcUser(identity: OidcIdentity): Promise<AuthUser> {
+    const provider = `oidc:${identity.issuer}`;
+    let lastRetryableError: unknown;
+
+    for (let attempt = 0; attempt < OIDC_RESOLUTION_MAX_ATTEMPTS; attempt++) {
+      try {
+        return await this.prisma.$transaction(
+          async (tx) => {
+            const providerAccount = await tx.account.findUnique({
+              where: {
+                verifyProviderAccount: {
+                  provider,
+                  providerAccountId: identity.subject,
+                },
+              },
+              include: { user: true },
+            });
+
+            if (providerAccount) {
+              return tx.user.update({
+                where: { uid: providerAccount.user.uid },
+                data: this.getOidcUserProfileUpdate(
+                  providerAccount.user,
+                  identity,
+                ),
+              });
+            }
+
+            const email = identity.email?.trim().toLowerCase();
+            if (!identity.emailVerified || !email || !validateEmail(email)) {
+              throw new UnauthorizedException(
+                'OIDC requires a verified email address',
+              );
+            }
+
+            const existingUser = await tx.user.findFirst({
+              where: {
+                email: {
+                  equals: email,
+                  mode: 'insensitive',
+                },
+              },
+            });
+
+            if (existingUser) {
+              await tx.account.create({
+                data: {
+                  provider,
+                  providerAccountId: identity.subject,
+                  user: { connect: { uid: existingUser.uid } },
+                },
+              });
+
+              return tx.user.update({
+                where: { uid: existingUser.uid },
+                data: this.getOidcUserProfileUpdate(existingUser, identity),
+              });
+            }
+
+            return tx.user.create({
+              data: {
+                email,
+                displayName: identity.name ?? null,
+                photoURL: identity.picture ?? null,
+                lastLoggedOn: new Date(),
+                providerAccounts: {
+                  create: {
+                    provider,
+                    providerAccountId: identity.subject,
+                  },
+                },
+              },
+            });
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+      } catch (error) {
+        if (!this.isOidcResolutionRetryable(error)) throw error;
+        lastRetryableError = error;
+      }
+    }
+
+    throw new ServiceUnavailableException('OIDC identity resolution failed', {
+      cause: lastRetryableError,
+    });
   }
 
   /**
@@ -388,5 +489,25 @@ export class AuthService {
 
   getAuthProviders() {
     return this.infraConfigService.getAllowedAuthProviders();
+  }
+
+  private getOidcUserProfileUpdate(user: AuthUser, identity: OidcIdentity) {
+    return {
+      displayName: user.displayName ?? identity.name ?? null,
+      photoURL: user.photoURL ?? identity.picture ?? null,
+      lastLoggedOn: new Date(),
+    };
+  }
+
+  private isOidcResolutionRetryable(error: unknown): boolean {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? error.code
+        : undefined;
+
+    return (
+      code === PrismaError.UNIQUE_CONSTRAINT_VIOLATION ||
+      code === PrismaError.TRANSACTION_DEADLOCK
+    );
   }
 }

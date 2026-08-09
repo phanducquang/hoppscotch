@@ -234,9 +234,21 @@ export class AuthController {
     );
     callbackUrl.search = new URL(req.originalUrl, callbackUrl).search;
 
-    await this.oidcService.exchangeAuthorizationCode(callbackUrl, transaction);
+    const identity = await this.oidcService.exchangeAuthorizationCode(
+      callbackUrl,
+      transaction,
+    );
+    const user = await this.authService.resolveOidcUser(identity);
+    const authTokens = await this.authService.generateAuthTokens(user.uid);
+    if (E.isLeft(authTokens)) throwHTTPErr(authTokens.left);
 
-    return res.status(HttpStatus.NO_CONTENT).send();
+    return authCookieHandler(
+      res,
+      authTokens.right,
+      true,
+      transaction.redirectUri,
+      this.configService,
+    );
   }
 
   /**
