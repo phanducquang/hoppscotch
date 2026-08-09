@@ -46,6 +46,14 @@
           @click="signInWithMicrosoft"
         />
         <HoppSmartItem
+          v-if="allowedAuthProviders.includes('OIDC')"
+          :icon="IconKeyRound"
+          :label="
+            t('state.continue_with_provider', { provider: oidcDisplayName })
+          "
+          @click="signInWithOIDC"
+        />
+        <HoppSmartItem
           v-if="allowedAuthProviders.includes('EMAIL')"
           :icon="IconEmail"
           :label="t('state.continue_email')"
@@ -175,6 +183,7 @@ import IconGoogle from '~icons/auth/google';
 import IconMicrosoft from '~icons/auth/microsoft';
 import IconArrowLeft from '~icons/lucide/arrow-left';
 import IconFileText from '~icons/lucide/file-text';
+import IconKeyRound from '~icons/lucide/key-round';
 
 const t = useI18n();
 const toast = useToast();
@@ -195,6 +204,7 @@ const mode = ref('sign-in');
 const nonAdminUser = ref(false);
 
 const allowedAuthProviders = ref<string[]>([]);
+const oidcDisplayName = ref('OpenID Connect');
 
 // check if the user can re-run onboarding
 const canReRunOnboarding = computedAsync(async () => {
@@ -252,6 +262,10 @@ const signInWithMicrosoft = () => {
   signingInWithMicrosoft.value = false;
 };
 
+const signInWithOIDC = () => {
+  auth.signInUserWithOIDC();
+};
+
 const signInWithEmail = async () => {
   signingInWithEmail.value = true;
   try {
@@ -269,7 +283,8 @@ const getAllowedAuthProviders = async () => {
   fetching.value = true;
   try {
     const res = await auth.getAllowedAuthProviders();
-    return res;
+    oidcDisplayName.value = res.oidcDisplayName;
+    return res.providers;
   } catch (e) {
     error.value = true;
     toast.error(t('state.error_auth_providers'));

@@ -203,6 +203,14 @@ export const auth = {
     }/auth/microsoft?redirect_uri=${import.meta.env.VITE_ADMIN_URL}`;
   },
 
+  signInUserWithOIDC: () => {
+    window.location.href = `${
+      import.meta.env.VITE_BACKEND_API_URL
+    }/auth/oidc?redirect_uri=${encodeURIComponent(
+      import.meta.env.VITE_ADMIN_URL,
+    )}`;
+  },
+
   signInWithEmailLink: (url: string) => {
     const urlObject = new URL(url);
     const searchParams = new URLSearchParams(urlObject.search);
@@ -233,7 +241,7 @@ export const auth = {
 
       if (!deviceIdentifier) {
         throw new Error(
-          'Device Identifier not found, you can only signin from the browser you generated the magic link'
+          'Device Identifier not found, you can only signin from the browser you generated the magic link',
         );
       }
 
@@ -246,7 +254,10 @@ export const auth = {
 
   getAllowedAuthProviders: async () => {
     const res = await authQuery.getProviders();
-    return res.data?.providers;
+    return {
+      providers: res.data?.providers ?? [],
+      oidcDisplayName: res.data?.oidcDisplayName?.trim() || 'OpenID Connect',
+    };
   },
 
   getFirstTimeInfraSetupStatus: async (): Promise<boolean> => {
