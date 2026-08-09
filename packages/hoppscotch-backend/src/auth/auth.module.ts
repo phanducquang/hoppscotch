@@ -16,6 +16,8 @@ import {
   isInfraConfigTablePopulated,
 } from 'src/infra-config/helper';
 import { InfraConfigModule } from 'src/infra-config/infra-config.module';
+import * as oidc from 'openid-client';
+import { OIDC_PROTOCOL_CLIENT, OidcService } from './oidc.service';
 
 @Module({
   imports: [
@@ -29,7 +31,11 @@ import { InfraConfigModule } from 'src/infra-config/infra-config.module';
     }),
     InfraConfigModule,
   ],
-  providers: [AuthService],
+  providers: [
+    AuthService,
+    OidcService,
+    { provide: OIDC_PROTOCOL_CLIENT, useValue: oidc },
+  ],
   controllers: [AuthController],
 })
 export class AuthModule {

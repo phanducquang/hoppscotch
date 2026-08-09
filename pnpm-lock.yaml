@@ -278,6 +278,9 @@ importers:
       nodemailer:
         specifier: 9.0.3
         version: 9.0.3
+      openid-client:
+        specifier: 6.8.4
+        version: 6.8.4
       passport:
         specifier: 0.7.0
         version: 0.7.0
@@ -10910,6 +10913,9 @@ packages:
   oas-validator@5.0.8:
     resolution: {integrity: sha512-cu20/HE5N5HKqVygs3dt94eYJfBi0TsZvPVXDhbXQHiEityDN+RROTleefoKRKKJ9dFAF2JBkDHgvWj0sjKGmw==}
 
+  oauth4webapi@3.8.6:
+    resolution: {integrity: sha512-iwemM91xz8nryHti2yTmg5fhyEMVOkOXwHNqbvcATjyajb5oQxCQzrNOA6uElRHuMhQQTKUyFKV9y/CNyg25BQ==}
+
   oauth@0.10.2:
     resolution: {integrity: sha512-JtFnB+8nxDEXgNyniwz573xxbKSOu3R8D40xQKqcjwJ2CDkYqUDI53o6IuzDJBx60Z8VKCm271+t8iFjakrl8Q==}
 
@@ -10973,6 +10979,9 @@ packages:
   opener@1.5.2:
     resolution: {integrity: sha512-ur5UIdyw5Y7yEj9wLzhqXiy6GZ3Mwx0yGI+5sMn2r0N0v3cKJvUmFH5yPP+WXh9e0xfyzyJX95D8l088DNFj7A==}
     hasBin: true
+
+  openid-client@6.8.4:
+    resolution: {integrity: sha512-QSw0BA08piujetEwfZsHoTrDpMEha7GDZDicQqVwX4u0ChCjefvjDB++TZ8BTg76UpwhzIQgdvvfgfl3HpCSAw==}
 
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
@@ -25995,6 +26004,8 @@ snapshots:
       should: 13.2.3
       yaml: 1.10.3
 
+  oauth4webapi@3.8.6: {}
+
   oauth@0.10.2: {}
 
   object-assign@4.1.1: {}
@@ -26054,6 +26065,11 @@ snapshots:
   openapi-types@12.1.3: {}
 
   opener@1.5.2: {}
+
+  openid-client@6.8.4:
+    dependencies:
+      jose: 6.2.3
+      oauth4webapi: 3.8.6
 
   optionator@0.9.4:
     dependencies:

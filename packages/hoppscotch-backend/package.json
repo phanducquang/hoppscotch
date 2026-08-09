@@ -65,6 +65,7 @@
     "io-ts": "2.2.22",
     "morgan": "1.11.0",
     "nodemailer": "9.0.3",
+    "openid-client": "6.8.4",
     "passport": "0.7.0",
     "passport-github2": "0.1.12",
     "passport-google-oauth20": "2.0.0",
