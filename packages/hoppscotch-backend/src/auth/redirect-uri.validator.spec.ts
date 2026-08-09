@@ -1,4 +1,7 @@
-import { isValidLocalhostRedirectUri } from './redirect-uri.validator';
+import {
+  isAllowedAuthRedirectUri,
+  isValidLocalhostRedirectUri,
+} from './redirect-uri.validator';
 
 describe('isValidLocalhostRedirectUri', () => {
   describe('valid loopback URIs', () => {
@@ -115,5 +118,66 @@ describe('isValidLocalhostRedirectUri', () => {
     test('Should return false for a relative path', () => {
       expect(isValidLocalhostRedirectUri('/device-token')).toBe(false);
     });
+  });
+});
+
+describe('isAllowedAuthRedirectUri', () => {
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3100/',
+    'https://hoppscotch.example.com',
+  ];
+
+  test('accepts app and admin URLs from configured origins', () => {
+    expect(
+      isAllowedAuthRedirectUri('http://localhost:3000', allowedOrigins),
+    ).toBe(true);
+    expect(
+      isAllowedAuthRedirectUri(
+        'http://localhost:3100/admin?from=oidc',
+        allowedOrigins,
+      ),
+    ).toBe(true);
+  });
+
+  test('rejects an external redirect URI', () => {
+    expect(
+      isAllowedAuthRedirectUri(
+        'https://attacker.example.com/steal',
+        allowedOrigins,
+      ),
+    ).toBe(false);
+  });
+
+  test('rejects suffix and credential-based origin bypasses', () => {
+    expect(
+      isAllowedAuthRedirectUri(
+        'http://localhost:3000.attacker.example.com',
+        allowedOrigins,
+      ),
+    ).toBe(false);
+    expect(
+      isAllowedAuthRedirectUri(
+        'http://localhost:3000@attacker.example.com',
+        allowedOrigins,
+      ),
+    ).toBe(false);
+  });
+
+  test('rejects malformed, non-HTTP, and absent URLs', () => {
+    expect(isAllowedAuthRedirectUri('not-a-url', allowedOrigins)).toBe(false);
+    expect(
+      isAllowedAuthRedirectUri('javascript:alert(1)', allowedOrigins),
+    ).toBe(false);
+    expect(isAllowedAuthRedirectUri(undefined, allowedOrigins)).toBe(false);
+  });
+
+  test('ignores malformed configured origins', () => {
+    expect(
+      isAllowedAuthRedirectUri('https://hoppscotch.example.com', [
+        '',
+        'not-a-url',
+      ]),
+    ).toBe(false);
   });
 });

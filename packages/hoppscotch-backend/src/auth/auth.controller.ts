@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpStatus,
   Post,
   Query,
   Request,
@@ -12,7 +13,7 @@ import {
 import { AuthService } from './auth.service';
 import { SignInMagicDto } from './dto/signin-magic.dto';
 import { VerifyMagicDto } from './dto/verify-magic.dto';
-import { Response } from 'express';
+import { Request as ExpressRequest, Response } from 'express';
 import * as E from 'fp-ts/Either';
 import { RTJwtAuthGuard } from './guards/rt-jwt-auth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -20,7 +21,10 @@ import { GqlUser } from 'src/decorators/gql-user.decorator';
 import { AuthUser } from 'src/types/AuthUser';
 import { RTCookie } from 'src/decorators/rt-cookie.decorator';
 import { AuthProvider, authCookieHandler, authProviderCheck } from './helper';
-import { isValidLocalhostRedirectUri } from './redirect-uri.validator';
+import {
+  isAllowedAuthRedirectUri,
+  isValidLocalhostRedirectUri,
+} from './redirect-uri.validator';
 import { GoogleSSOGuard } from './guards/google-sso.guard';
 import { GithubSSOGuard } from './guards/github-sso.guard';
 import { MicrosoftSSOGuard } from './guards/microsoft-sso.guard';
@@ -30,6 +34,7 @@ import { AUTH_PROVIDER_NOT_SPECIFIED } from 'src/errors';
 import { ConfigService } from '@nestjs/config';
 import { throwHTTPErr } from 'src/utils';
 import { UserLastLoginInterceptor } from 'src/interceptors/user-last-login.interceptor';
+import { OidcService } from './oidc.service';
 
 @UseGuards(ThrottlerBehindProxyGuard)
 @Controller({ path: 'auth', version: '1' })
@@ -37,6 +42,7 @@ export class AuthController {
   constructor(
     private authService: AuthService,
     private configService: ConfigService,
+    private oidcService: OidcService,
   ) {}
 
   @Get('providers')
@@ -104,7 +110,9 @@ export class AuthController {
    */
   @Get('google')
   @UseGuards(GoogleSSOGuard)
-  async googleAuth(@Request() req) {}
+  async googleAuth(@Request() req) {
+    void req;
+  }
 
   /**
    ** Callback URL for Google SSO
@@ -131,7 +139,9 @@ export class AuthController {
    */
   @Get('github')
   @UseGuards(GithubSSOGuard)
-  async githubAuth(@Request() req) {}
+  async githubAuth(@Request() req) {
+    void req;
+  }
 
   /**
    ** Callback URL for Github SSO
@@ -158,7 +168,9 @@ export class AuthController {
    */
   @Get('microsoft')
   @UseGuards(MicrosoftSSOGuard)
-  async microsoftAuth(@Request() req) {}
+  async microsoftAuth(@Request() req) {
+    void req;
+  }
 
   /**
    ** Callback URL for Microsoft SSO
@@ -178,6 +190,53 @@ export class AuthController {
       req.authInfo.state.redirect_uri,
       this.configService,
     );
+  }
+
+  /**
+   * Start a generic OpenID Connect Authorization Code + PKCE flow.
+   */
+  @Get('oidc')
+  async oidcAuth(
+    @Query('redirect_uri') redirectUri: string,
+    @Res() res: Response,
+  ) {
+    this.assertOidcEnabled();
+
+    if (!isAllowedAuthRedirectUri(redirectUri, this.getAuthRedirectOrigins())) {
+      throwHTTPErr({ message: 'Invalid OIDC redirect URI', statusCode: 400 });
+    }
+
+    const authorizationRequest =
+      await this.oidcService.createAuthorizationRequest(redirectUri);
+    this.oidcService.saveTransaction(res, authorizationRequest.transaction);
+
+    return res.redirect(
+      HttpStatus.FOUND,
+      authorizationRequest.authorizationUrl.href,
+    );
+  }
+
+  /**
+   * Complete and validate the OIDC protocol exchange. Hoppscotch user/session
+   * resolution is intentionally added in the following integration phase.
+   */
+  @Get('oidc/callback')
+  @SkipThrottle()
+  async oidcAuthCallback(@Request() req: ExpressRequest, @Res() res: Response) {
+    if (!this.isOidcEnabled()) {
+      this.oidcService.clearTransaction(res);
+      throwHTTPErr({ message: AUTH_PROVIDER_NOT_SPECIFIED, statusCode: 404 });
+    }
+
+    const transaction = this.oidcService.consumeTransaction(req, res);
+    const callbackUrl = new URL(
+      this.configService.get<string>('INFRA.OIDC_CALLBACK_URL'),
+    );
+    callbackUrl.search = new URL(req.originalUrl, callbackUrl).search;
+
+    await this.oidcService.exchangeAuthorizationCode(callbackUrl, transaction);
+
+    return res.status(HttpStatus.NO_CONTENT).send();
   }
 
   /**
@@ -226,5 +285,29 @@ export class AuthController {
       uid: user.uid,
       message: 'Token is valid',
     };
+  }
+
+  private isOidcEnabled(): boolean {
+    return authProviderCheck(
+      AuthProvider.OIDC,
+      this.configService.get('INFRA.VITE_ALLOWED_AUTH_PROVIDERS'),
+    );
+  }
+
+  private assertOidcEnabled(): void {
+    if (!this.isOidcEnabled()) {
+      throwHTTPErr({ message: AUTH_PROVIDER_NOT_SPECIFIED, statusCode: 404 });
+    }
+  }
+
+  private getAuthRedirectOrigins(): string[] {
+    const whitelistedOrigins =
+      this.configService.get<string>('WHITELISTED_ORIGINS')?.split(',') ?? [];
+
+    return [
+      ...whitelistedOrigins,
+      this.configService.get<string>('VITE_BASE_URL'),
+      this.configService.get<string>('VITE_ADMIN_URL'),
+    ];
   }
 }

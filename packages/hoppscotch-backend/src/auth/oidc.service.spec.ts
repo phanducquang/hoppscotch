@@ -239,6 +239,21 @@ describe('OidcService', () => {
       expect(res.clearCookie).toHaveBeenCalled();
     });
 
+    it('rejects and clears a missing transaction', () => {
+      const res = createResponse();
+      const req = { cookies: {} } as Request;
+
+      expect(() => service.consumeTransaction(req, res)).toThrow(
+        'OIDC transaction is missing',
+      );
+      expect(res.clearCookie).toHaveBeenCalledWith('__oauth_nonce_oidc', {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: false,
+        path: '/v1/auth/oidc',
+      });
+    });
+
     it('rejects a tampered transaction cookie', () => {
       const res = createResponse();
       service.saveTransaction(res, transaction);
@@ -269,7 +284,15 @@ describe('OidcService', () => {
   });
 
   describe('authorization code exchange', () => {
-    it('passes state, nonce, and PKCE checks and extracts verified claims', async () => {
+    const transaction: OidcTransaction = {
+      codeVerifier: 'pkce-verifier',
+      state: 'random-state',
+      nonce: 'random-nonce',
+      redirectUri: 'http://localhost:3000',
+      createdAt: Date.now(),
+    };
+
+    const mockTokenClaims = (overrides: Record<string, unknown> = {}) => {
       protocolClient.authorizationCodeGrant.mockResolvedValue({
         access_token: 'provider-access-token',
         token_type: 'bearer',
@@ -284,16 +307,14 @@ describe('OidcService', () => {
           picture: 'https://example.com/avatar.png',
           iat: 1,
           exp: 2,
+          ...overrides,
         }),
         expiresIn: () => 300,
       } as never);
-      const transaction: OidcTransaction = {
-        codeVerifier: 'pkce-verifier',
-        state: 'random-state',
-        nonce: 'random-nonce',
-        redirectUri: 'http://localhost:3000',
-        createdAt: Date.now(),
-      };
+    };
+
+    it('passes state, nonce, and PKCE checks and extracts verified claims', async () => {
+      mockTokenClaims();
 
       const identity = await service.exchangeAuthorizationCode(
         new URL(
@@ -320,6 +341,69 @@ describe('OidcService', () => {
         name: 'OIDC User',
         picture: 'https://example.com/avatar.png',
       });
+    });
+
+    it('rejects a state mismatch before exchanging the code', async () => {
+      await expect(
+        service.exchangeAuthorizationCode(
+          new URL(
+            `${DEFAULT_CONFIG['INFRA.OIDC_CALLBACK_URL']}?code=code&state=wrong-state`,
+          ),
+          transaction,
+        ),
+      ).rejects.toThrow('OIDC state is invalid');
+      expect(protocolClient.discovery).not.toHaveBeenCalled();
+      expect(protocolClient.authorizationCodeGrant).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['issuer', { iss: 'https://attacker.example.com' }],
+      ['audience', { aud: 'another-client' }],
+      ['nonce', { nonce: 'wrong-nonce' }],
+    ])('rejects an invalid ID token %s', async (_claim, overrides) => {
+      mockTokenClaims(overrides);
+
+      await expect(
+        service.exchangeAuthorizationCode(
+          new URL(
+            `${DEFAULT_CONFIG['INFRA.OIDC_CALLBACK_URL']}?code=code&state=random-state`,
+          ),
+          transaction,
+        ),
+      ).rejects.toThrow('OIDC ID token claims are invalid');
+    });
+
+    it('rejects an ID token without required identity claims', async () => {
+      protocolClient.authorizationCodeGrant.mockResolvedValue({
+        access_token: 'provider-access-token',
+        token_type: 'bearer',
+        claims: () => undefined,
+        expiresIn: () => 300,
+      } as never);
+
+      await expect(
+        service.exchangeAuthorizationCode(
+          new URL(
+            `${DEFAULT_CONFIG['INFRA.OIDC_CALLBACK_URL']}?code=code&state=random-state`,
+          ),
+          transaction,
+        ),
+      ).rejects.toThrow('OIDC ID token is missing claims');
+    });
+
+    it('rejects an ID token that fails cryptographic validation', async () => {
+      protocolClient.authorizationCodeGrant.mockRejectedValue(
+        new Error('JWT signature verification failed'),
+      );
+
+      await expect(
+        service.exchangeAuthorizationCode(
+          new URL(
+            `${DEFAULT_CONFIG['INFRA.OIDC_CALLBACK_URL']}?code=code&state=random-state`,
+          ),
+          transaction,
+        ),
+      ).rejects.toThrow('JWT signature verification failed');
     });
   });
 });

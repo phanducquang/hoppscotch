@@ -7,7 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
 import * as crypto from 'crypto';
-import * as oidc from 'openid-client';
+import type * as oidc from 'openid-client';
 
 export const OIDC_PROTOCOL_CLIENT = Symbol('OIDC_PROTOCOL_CLIENT');
 export const OIDC_TRANSACTION_MAX_AGE_MS = 5 * 60 * 1000;
@@ -220,11 +220,18 @@ export class OidcService {
     );
   }
 
+  clearTransaction(res: Response): void {
+    res.clearCookie(
+      this.getTransactionCookieName(),
+      this.getTransactionCookieClearOptions(),
+    );
+  }
+
   consumeTransaction(req: Request, res: Response): OidcTransaction {
     const cookieName = this.getTransactionCookieName();
     const cookieValue = req.cookies?.[cookieName];
 
-    res.clearCookie(cookieName, this.getTransactionCookieClearOptions());
+    this.clearTransaction(res);
 
     if (!cookieValue) {
       throw new UnauthorizedException('OIDC transaction is missing');
@@ -248,6 +255,10 @@ export class OidcService {
     currentUrl: URL,
     transaction: OidcTransaction,
   ): Promise<OidcIdentity> {
+    if (currentUrl.searchParams.get('state') !== transaction.state) {
+      throw new UnauthorizedException('OIDC state is invalid');
+    }
+
     const settings = this.loadSettings();
     const configuration = await this.getConfiguration();
 
