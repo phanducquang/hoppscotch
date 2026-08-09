@@ -9,10 +9,22 @@ import {
 } from "@app/api/generated/graphql"
 
 const expectedAllowedProvidersSchema = z.object({
-  // currently supported values are "GOOGLE", "GITHUB", "EMAIL", "MICROSOFT", "SAML"
+  // currently supported values include "GOOGLE", "GITHUB", "EMAIL",
+  // "MICROSOFT", "OIDC", and "SAML"
   // keeping it as string to avoid backend accidentally breaking frontend when adding new providers
   providers: z.array(z.string()),
+  oidcDisplayName: z.string().optional(),
 })
+
+export const normalizeAllowedAuthProviders = (
+  providers: string[],
+  oidcDisplayName?: string
+) =>
+  providers.map((provider) =>
+    provider === "OIDC"
+      ? `OIDC:${oidcDisplayName?.trim() || "OpenID Connect"}`
+      : provider
+  )
 
 export const getAllowedAuthProviders = async () => {
   try {
@@ -29,7 +41,12 @@ export const getAllowedAuthProviders = async () => {
       return E.left("SOMETHING_WENT_WRONG")
     }
 
-    return E.right(parseResult.data.providers)
+    return E.right(
+      normalizeAllowedAuthProviders(
+        parseResult.data.providers,
+        parseResult.data.oidcDisplayName
+      )
+    )
   } catch (_) {
     return E.left("SOMETHING_WENT_WRONG")
   }

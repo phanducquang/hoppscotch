@@ -12,6 +12,7 @@ import {
 import { PersistenceService } from "@hoppscotch/common/services/persistence"
 
 import { getAllowedAuthProviders, updateUserDisplayName } from "./api"
+import IconKeyRound from "~icons/lucide/key-round"
 
 export const authEvents$ = new Subject<AuthEvent | { event: "token_refresh" }>()
 const currentUser$ = new BehaviorSubject<HoppUser | null>(null)
@@ -37,6 +38,13 @@ async function signInUserWithMicrosoftFB() {
   window.location.href = `${
     import.meta.env.VITE_BACKEND_API_URL
   }/auth/microsoft`
+}
+
+async function signInUserWithOIDC() {
+  const redirectUri = window.location.origin
+  window.location.href = `${
+    import.meta.env.VITE_BACKEND_API_URL
+  }/auth/oidc?redirect_uri=${encodeURIComponent(redirectUri)}`
 }
 
 async function getInitialUserDetails() {
@@ -373,6 +381,18 @@ export const def: AuthPlatformDef = {
     }
   },
   getAllowedAuthProviders,
+
+  additionalLoginItems: [
+    {
+      id: "OIDC",
+      icon: IconKeyRound,
+      text: (t) =>
+        t("auth.continue_with_auth_provider", {
+          provider: "OpenID Connect",
+        }),
+      onClick: signInUserWithOIDC,
+    },
+  ],
 
   /**
    * Verifies if the current user's authentication tokens are valid

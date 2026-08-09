@@ -48,7 +48,12 @@ export class AuthController {
   @Get('providers')
   async getAuthProviders() {
     const providers = await this.authService.getAuthProviders();
-    return { providers };
+    const oidcDisplayName = providers.includes(AuthProvider.OIDC)
+      ? this.configService.get<string>('INFRA.OIDC_DISPLAY_NAME')?.trim() ||
+        'OpenID Connect'
+      : undefined;
+
+    return { providers, oidcDisplayName };
   }
 
   /**

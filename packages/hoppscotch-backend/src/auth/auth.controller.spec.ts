@@ -16,6 +16,7 @@ import {
 const DEFAULT_CONFIG = {
   'INFRA.VITE_ALLOWED_AUTH_PROVIDERS': 'EMAIL,OIDC',
   'INFRA.OIDC_CALLBACK_URL': 'http://api.example.test/v1/auth/oidc/callback',
+  'INFRA.OIDC_DISPLAY_NAME': 'Keycloak',
   'INFRA.ACCESS_TOKEN_VALIDITY': '86400000',
   'INFRA.REFRESH_TOKEN_VALIDITY': '604800000',
   'INFRA.ALLOW_SECURE_COOKIES': 'false',
@@ -96,6 +97,36 @@ describe('AuthController OIDC routes', () => {
       }),
     );
     controller = new AuthController(authService, configService, oidcService);
+  });
+
+  it('returns the configured OIDC display name with enabled providers', async () => {
+    authService.getAuthProviders.mockReturnValue(['EMAIL', 'OIDC']);
+
+    await expect(controller.getAuthProviders()).resolves.toEqual({
+      providers: ['EMAIL', 'OIDC'],
+      oidcDisplayName: 'Keycloak',
+    });
+  });
+
+  it('uses the generic OIDC display name when none is configured', async () => {
+    authService.getAuthProviders.mockReturnValue(['OIDC']);
+    configService.get.mockImplementation((key: string) =>
+      key === 'INFRA.OIDC_DISPLAY_NAME' ? '   ' : DEFAULT_CONFIG[key],
+    );
+
+    await expect(controller.getAuthProviders()).resolves.toEqual({
+      providers: ['OIDC'],
+      oidcDisplayName: 'OpenID Connect',
+    });
+  });
+
+  it('does not return OIDC metadata when OIDC is disabled', async () => {
+    authService.getAuthProviders.mockReturnValue(['EMAIL']);
+
+    await expect(controller.getAuthProviders()).resolves.toEqual({
+      providers: ['EMAIL'],
+      oidcDisplayName: undefined,
+    });
   });
 
   it('starts OIDC for an allowed app origin and redirects to the provider', async () => {
