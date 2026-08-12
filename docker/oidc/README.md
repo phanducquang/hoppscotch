@@ -4,6 +4,10 @@ This development-only Compose stack runs the Hoppscotch fork with PostgreSQL
 and Keycloak. Keycloak is an OIDC test provider and is not required by the
 production image.
 
+See the [Generic OIDC self-hosting guide](../../docs/selfhost-oidc.md) for
+provider requirements, production configuration, account-linking behavior,
+security details, and troubleshooting.
+
 ## Prerequisites
 
 - Docker with Compose v2
