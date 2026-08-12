@@ -169,7 +169,7 @@ describe('AuthController OIDC routes', () => {
       originalUrl:
         '/v1/auth/oidc/callback?code=authorization-code&state=random-state',
       cookies: { transaction: 'encrypted' },
-    } as Request;
+    } as unknown as Request;
 
     await controller.oidcAuthCallback(req, res);
 
