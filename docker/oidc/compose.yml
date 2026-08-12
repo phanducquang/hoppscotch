@@ -1,0 +1,82 @@
+name: hoppscotch-oidc-dev
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: testpass
+      POSTGRES_DB: hoppscotch
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-databases.sql:/docker-entrypoint-initdb.d/01-create-keycloak.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hoppscotch"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.1
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: testpass
+      KC_HOSTNAME: http://keycloak.local:8080
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    volumes:
+      - ./keycloak-realm.json:/opt/keycloak/data/import/hoppscotch-realm.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  hoppscotch-migrate:
+    build:
+      context: ../..
+      dockerfile: prod.Dockerfile
+      target: backend
+    env_file:
+      - ./hoppscotch.env.example
+    command: pnpm exec prisma migrate deploy
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  hoppscotch-aio:
+    # Onboarding and infra-config updates intentionally stop the backend so the
+    # whole AIO container can reload its configuration.
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: prod.Dockerfile
+      target: aio
+    env_file:
+      - ./hoppscotch.env.example
+    extra_hosts:
+      - "keycloak.local:host-gateway"
+    ports:
+      - "3000:3000"
+      - "3100:3100"
+      - "3170:3170"
+      - "3200:3200"
+    volumes:
+      - webapp-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+      hoppscotch-migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-data:
+  webapp-data:
