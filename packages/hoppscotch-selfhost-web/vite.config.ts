@@ -1,7 +1,7 @@
-import { defineConfig, loadEnv, normalizePath } from "vite"
+import { defineConfig, loadEnv } from "vite"
 import { APP_INFO, META_TAGS } from "./meta"
-import { viteStaticCopy as StaticCopy } from "vite-plugin-static-copy"
-import generateSitemap from "vite-plugin-pages-sitemap"
+// import { viteStaticCopy as StaticCopy } from "vite-plugin-static-copy"
+// import generateSitemap from "vite-plugin-pages-sitemap"
 import HtmlConfig from "vite-plugin-html-config"
 import Vue from "@vitejs/plugin-vue"
 import VueI18n from "@intlify/unplugin-vue-i18n/vite"
@@ -104,28 +104,33 @@ export default defineConfig({
       metas: META_TAGS(ENV),
     }),
     Vue(),
+    // Pages({
+    //   routeStyle: "nuxt",
+    //   dirs: ["../hoppscotch-common/src/pages", "./src/pages"],
+    //   importMode: "async",
+    //   onRoutesGenerated(routes) {
+    //     generateSitemap({
+    //       routes,
+    //       nuxtStyle: true,
+    //       allowRobots: true,
+    //       dest: ".sitemap-gen",
+    //       hostname: ENV.VITE_BASE_URL,
+    //     })
+    //   },
+    // }),
     Pages({
       routeStyle: "nuxt",
       dirs: ["../hoppscotch-common/src/pages", "./src/pages"],
       importMode: "async",
-      onRoutesGenerated(routes) {
-        generateSitemap({
-          routes,
-          nuxtStyle: true,
-          allowRobots: true,
-          dest: ".sitemap-gen",
-          hostname: ENV.VITE_BASE_URL,
-        })
-      },
     }),
-    StaticCopy({
-      targets: [
-        {
-          src: normalizePath(path.resolve(__dirname, "./.sitemap-gen/*")),
-          dest: normalizePath(path.resolve(__dirname, "./dist")),
-        },
-      ],
-    }),
+    // StaticCopy({
+    //   targets: [
+    //     {
+    //       src: normalizePath(path.resolve(__dirname, "./.sitemap-gen/*")),
+    //       dest: normalizePath(path.resolve(__dirname, "./dist")),
+    //     },
+    //   ],
+    // }),
     Layouts({
       layoutsDirs: "../hoppscotch-common/src/layouts",
       defaultLayout: "default",
