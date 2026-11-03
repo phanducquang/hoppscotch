@@ -329,13 +329,27 @@ export class OidcService {
     return `${sessionCookieName || '__oauth_nonce'}_oidc`;
   }
 
+  private getTransactionCookiePath(): string {
+    try {
+      // Use the public callback path: a reverse proxy may strip /backend before
+      // forwarding to Nest, but the browser must send the cookie to that path.
+      const callbackUrl = new URL(
+        this.configService.get<string>('INFRA.OIDC_CALLBACK_URL'),
+      );
+      return callbackUrl.pathname.replace(/\/callback\/?$/, '') || '/';
+    } catch {
+      // Clearing a transaction must still work when OIDC is disabled/unset.
+      return '/v1/auth/oidc';
+    }
+  }
+
   private getTransactionCookieOptions() {
     return {
       httpOnly: true,
       sameSite: 'lax' as const,
       secure: this.shouldUseSecureCookies(),
       maxAge: OIDC_TRANSACTION_MAX_AGE_MS,
-      path: '/v1/auth/oidc',
+      path: this.getTransactionCookiePath(),
     };
   }
 
@@ -344,7 +358,7 @@ export class OidcService {
       httpOnly: true,
       sameSite: 'lax' as const,
       secure: this.shouldUseSecureCookies(),
-      path: '/v1/auth/oidc',
+      path: this.getTransactionCookiePath(),
     };
   }
 

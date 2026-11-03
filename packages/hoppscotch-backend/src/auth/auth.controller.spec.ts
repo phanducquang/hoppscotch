@@ -198,6 +198,61 @@ describe('AuthController OIDC routes', () => {
     expect(res.redirect).toHaveBeenCalledWith(transaction.redirectUri);
   });
 
+  it.each(['', '/admin'])(
+    'completes OIDC through the stripped backend path and returns to the subpath destination %s',
+    async (destinationPath) => {
+      const baseUrl = 'https://hoppscotch.example.test';
+      const redirectUri = `${baseUrl}${destinationPath}`;
+      const callbackUrl = `${baseUrl}/backend/v1/auth/oidc/callback`;
+      const subpathConfig = {
+        ...DEFAULT_CONFIG,
+        ENABLE_SUBPATH_BASED_ACCESS: 'true',
+        VITE_BASE_URL: baseUrl,
+        VITE_ADMIN_URL: `${baseUrl}/admin`,
+        WHITELISTED_ORIGINS: baseUrl,
+        'INFRA.OIDC_CALLBACK_URL': callbackUrl,
+        'INFRA.ALLOW_SECURE_COOKIES': 'true',
+      };
+      configService.get.mockImplementation((key: string) => subpathConfig[key]);
+      const subpathTransaction = { ...transaction, redirectUri };
+      oidcService.createAuthorizationRequest.mockResolvedValue({
+        ...authorizationRequest,
+        transaction: subpathTransaction,
+      });
+      oidcService.consumeTransaction.mockReturnValue(subpathTransaction);
+      const res = createResponse();
+
+      await controller.oidcAuth(redirectUri, res);
+
+      expect(oidcService.createAuthorizationRequest).toHaveBeenCalledWith(
+        redirectUri,
+      );
+      expect(oidcService.saveTransaction).toHaveBeenCalledWith(
+        res,
+        subpathTransaction,
+      );
+
+      // Caddy strips /backend before forwarding the callback to Nest.
+      await controller.oidcAuthCallback(
+        {
+          originalUrl: '/v1/auth/oidc/callback?code=code&state=random-state',
+        } as Request,
+        res,
+      );
+
+      expect(oidcService.exchangeAuthorizationCode).toHaveBeenCalledWith(
+        new URL(`${callbackUrl}?code=code&state=random-state`),
+        subpathTransaction,
+      );
+      expect(res.cookie).toHaveBeenCalledWith(
+        'access_token',
+        'hoppscotch-access-token',
+        expect.objectContaining({ secure: true, httpOnly: true }),
+      );
+      expect(res.redirect).toHaveBeenLastCalledWith(redirectUri);
+    },
+  );
+
   it('clears the transaction and rejects a callback when OIDC is disabled', async () => {
     configService.get.mockImplementation((key: string) =>
       key === 'INFRA.VITE_ALLOWED_AUTH_PROVIDERS'

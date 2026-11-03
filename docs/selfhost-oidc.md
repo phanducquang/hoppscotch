@@ -108,6 +108,49 @@ https://api.example.com/v1/auth/oidc?redirect_uri=https%3A%2F%2Fapp.example.com
 An external destination such as `https://attacker.example.com` is rejected
 before provider discovery begins.
 
+### Single-domain deployment with subpath access
+
+The AIO image supports OIDC with `ENABLE_SUBPATH_BASED_ACCESS=true`. Use the
+same public domain for the App, Admin, and backend, with the following URL
+configuration in addition to the database, encryption key, issuer, client ID,
+client secret, and scopes above:
+
+```dotenv
+ENABLE_SUBPATH_BASED_ACCESS=true
+
+VITE_BASE_URL=https://hopp.example.com
+VITE_SHORTCODE_BASE_URL=https://hopp.example.com
+VITE_ADMIN_URL=https://hopp.example.com/admin
+VITE_BACKEND_API_URL=https://hopp.example.com/backend/v1
+VITE_BACKEND_GQL_URL=https://hopp.example.com/backend/graphql
+VITE_BACKEND_WS_URL=wss://hopp.example.com/backend/graphql
+WHITELISTED_ORIGINS=https://hopp.example.com
+
+OIDC_CALLBACK_URL=https://hopp.example.com/backend/v1/auth/oidc/callback
+```
+
+Register this exact public callback URL with the OIDC provider. Keep
+`WHITELISTED_ORIGINS` as origins without `/admin` or `/backend` paths. The
+post-login redirect retains the allowed App or Admin URL, including `/admin`
+and any subsequent path or query.
+
+The OIDC transaction cookie path is derived from `OIDC_CALLBACK_URL`: it is
+`/backend/v1/auth/oidc` in this example and `/v1/auth/oidc` in multiport mode.
+Creating and clearing the cookie use the same public path. The backend's Nest
+routes do not change; Caddy strips `/backend` before forwarding requests.
+
+For Kubernetes, route the domain's `/` path without an Ingress rewrite to the
+AIO Caddy port (`80` by default). For non-root containers, set
+`HOPP_ALTERNATE_PORT=8000` and target port `8000` instead. Use `/backend/ping`
+for startup/liveness probes and `/backend/health` for database-aware readiness
+on that port. Preserve the public host and scheme through the reverse proxy
+and configure `TRUST_PROXY` for that trusted deployment topology.
+
+After rebuilding and deploying the image, verify login from both `/` and
+`/admin`: the callback should complete, clear the transaction cookie, and
+return to the page that initiated login. Also verify logout and a fresh login.
+No database schema migration is required for this subpath support change.
+
 ## Keycloak client configuration
 
 Create one client in the target Keycloak realm with these settings:
@@ -236,7 +279,9 @@ again with the same issuer and subject reuses the same Hoppscotch user.
 - Issuer, audience, nonce, and state are validated before identity resolution.
 - The PKCE verifier and nonce are never placed in query parameters.
 - Temporary login state is stored for at most five minutes in an AES-GCM
-  encrypted, `HttpOnly`, `SameSite=Lax` cookie scoped to `/v1/auth/oidc`.
+  encrypted, `HttpOnly`, `SameSite=Lax` cookie scoped to the public OIDC path
+  derived from `OIDC_CALLBACK_URL` (for example, `/v1/auth/oidc` or
+  `/backend/v1/auth/oidc`).
 - The temporary cookie is marked `Secure` when the callback uses HTTPS or
   secure cookies are enabled.
 - The temporary transaction is cleared when it is consumed, including invalid

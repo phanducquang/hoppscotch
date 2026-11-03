@@ -224,6 +224,68 @@ describe('OidcService', () => {
       });
     });
 
+    it.each([
+      [
+        'false',
+        'https://api.example.test/v1/auth/oidc/callback',
+        '/v1/auth/oidc',
+      ],
+      [
+        'true',
+        'https://hoppscotch.example.test/backend/v1/auth/oidc/callback',
+        '/backend/v1/auth/oidc',
+      ],
+    ])(
+      'round-trips and clears the public cookie path with subpath access %s',
+      (subpathAccess, callbackUrl, cookiePath) => {
+        configService.get.mockImplementation((key: string) => {
+          if (key === 'INFRA.OIDC_CALLBACK_URL') return callbackUrl;
+          if (key === 'ENABLE_SUBPATH_BASED_ACCESS') return subpathAccess;
+          return DEFAULT_CONFIG[key];
+        });
+        const res = createResponse();
+
+        service.saveTransaction(res, transaction);
+
+        const [cookieName, cookieValue, options] = (res.cookie as jest.Mock)
+          .mock.calls[0];
+        expect(options).toEqual({
+          httpOnly: true,
+          sameSite: 'lax',
+          secure: true,
+          maxAge: OIDC_TRANSACTION_MAX_AGE_MS,
+          path: cookiePath,
+        });
+        const callbackPath = new URL(callbackUrl).pathname;
+        expect(callbackPath.startsWith(`${options.path}/`)).toBe(true);
+
+        const req = { cookies: { [cookieName]: cookieValue } } as Request;
+        expect(service.consumeTransaction(req, res)).toEqual(transaction);
+        expect(res.clearCookie).toHaveBeenCalledWith(cookieName, {
+          httpOnly: true,
+          sameSite: 'lax',
+          secure: true,
+          path: cookiePath,
+        });
+      },
+    );
+
+    it.each([undefined, 'not-a-url'])(
+      'can clear a transaction when OIDC has no valid callback (%s)',
+      (callbackUrl) => {
+        configService.get.mockImplementation((key: string) =>
+          key === 'INFRA.OIDC_CALLBACK_URL' ? callbackUrl : DEFAULT_CONFIG[key],
+        );
+        const res = createResponse();
+
+        expect(() => service.clearTransaction(res)).not.toThrow();
+        expect(res.clearCookie).toHaveBeenCalledWith(
+          '__oauth_nonce_oidc',
+          expect.objectContaining({ path: '/v1/auth/oidc' }),
+        );
+      },
+    );
+
     it('rejects and clears an expired transaction', () => {
       const res = createResponse();
       service.saveTransaction(res, {

@@ -11,6 +11,7 @@ import {
 import { throwErr } from 'src/utils';
 import { ConfigService } from '@nestjs/config';
 import { IncomingHttpHeaders } from 'http';
+import { isAllowedAuthRedirectUri } from './redirect-uri.validator';
 
 enum AuthTokenType {
   ACCESS_TOKEN = 'access_token',
@@ -72,12 +73,15 @@ export const authCookieHandler = (
     return res.status(HttpStatus.OK).send();
   }
 
-  // check to see if redirectUrl is a whitelisted url
-  const whitelistedOrigins =
-    configService.get('WHITELISTED_ORIGINS')?.split(',') ?? [];
-  if (!whitelistedOrigins.includes(redirectUrl))
-    // if it is not redirect by default to App
+  // Match origins so destinations such as /admin survive subpath deployments.
+  const allowedOrigins = [
+    ...(configService.get<string>('WHITELISTED_ORIGINS')?.split(',') ?? []),
+    configService.get<string>('VITE_BASE_URL'),
+    configService.get<string>('VITE_ADMIN_URL'),
+  ];
+  if (!isAllowedAuthRedirectUri(redirectUrl, allowedOrigins)) {
     redirectUrl = configService.get('VITE_BASE_URL');
+  }
 
   return res.status(HttpStatus.OK).redirect(redirectUrl);
 };
