@@ -28,6 +28,7 @@
   },
   "configs": {
     "auth_providers": {
+      "oidc_secret_hint": "Leave Client Secret blank to keep the saved secret. Enter a secret when configuring OIDC for the first time. Scopes must include openid. Register the exact Callback URL with your provider.",
       "auth_provider_config": "Authentication Configurations",
       "auth_provider_description": "Set up authentication methods for your Hoppscotch instance using OAuth or Email.",
       "callback_url": "CALLBACK URL",

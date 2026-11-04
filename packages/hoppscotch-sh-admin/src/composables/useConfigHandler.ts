@@ -25,6 +25,7 @@ import {
   GOOGLE_CONFIGS,
   MAIL_CONFIGS,
   MICROSOFT_CONFIGS,
+  OIDC_CONFIGS,
   MOCK_SERVER_CONFIGS,
   PROXY_URL_CONFIGS,
   ServerConfigs,
@@ -85,6 +86,22 @@ export function useConfigHandler(updatedConfigs?: ServerConfigs) {
     // Transforming the fetched data into a Configs object
     currentConfigs.value = {
       providers: {
+        oidc: {
+          name: 'oidc',
+          enabled: allowedAuthProviders.value.includes(AuthProvider.Oidc),
+          fields: {
+            display_name: getFieldValue(InfraConfigEnum.OidcDisplayName),
+            issuer: getFieldValue(InfraConfigEnum.OidcIssuer),
+            client_id: getFieldValue(InfraConfigEnum.OidcClientId),
+            client_secret: '',
+            callback_url:
+              getFieldValue(InfraConfigEnum.OidcCallbackUrl) ||
+              `${(import.meta.env.VITE_BACKEND_API_URL ?? '').replace(/\/$/, '')}/auth/oidc/callback`,
+            scope:
+              getFieldValue(InfraConfigEnum.OidcScope) ||
+              'openid profile email',
+          },
+        },
         google: {
           name: 'google',
           enabled: allowedAuthProviders.value.includes(AuthProvider.Google),
@@ -252,6 +269,11 @@ export function useConfigHandler(updatedConfigs?: ServerConfigs) {
   const transformInfraConfigs = () => {
     const updatedWorkingConfigs: ConfigTransform[] = [
       {
+        config: OIDC_CONFIGS,
+        enabled: updatedConfigs?.providers.oidc.enabled,
+        fields: updatedConfigs?.providers.oidc.fields,
+      },
+      {
         config: GOOGLE_CONFIGS,
         enabled: updatedConfigs?.providers.google.enabled,
         fields: updatedConfigs?.providers.google.fields,
@@ -302,6 +324,8 @@ export function useConfigHandler(updatedConfigs?: ServerConfigs) {
           // The form-level guard already blocks the save, but skip here too
           // so a stray empty value can't blackhole unrelated settings.
           if (name === InfraConfigEnum.ProxyAppUrl && !value.trim()) return;
+          if (name === InfraConfigEnum.OidcClientSecret && !value.trim())
+            return;
           transformedConfigs.push({ name, value });
         }
       });
@@ -311,7 +335,7 @@ export function useConfigHandler(updatedConfigs?: ServerConfigs) {
   };
 
   // Generic function to handle mutation execution and error handling
-  const executeMutation = async <T, V>(
+  const executeMutation = async <T>(
     mutation: UseMutationResponse<T>,
     variables: AnyVariables = undefined,
     errorMessage: string
@@ -336,6 +360,12 @@ export function useConfigHandler(updatedConfigs?: ServerConfigs) {
     updateProviderStatus: UseMutationResponse<EnableAndDisableSsoMutation>
   ) => {
     const updatedAllowedAuthProviders: EnableAndDisableSsoArgs[] = [
+      {
+        provider: AuthProvider.Oidc,
+        status: updatedConfigs?.providers.oidc.enabled
+          ? ServiceStatus.Enable
+          : ServiceStatus.Disable,
+      },
       {
         provider: AuthProvider.Google,
         status: updatedConfigs?.providers.google.enabled
@@ -509,7 +539,9 @@ export function useConfigHandler(updatedConfigs?: ServerConfigs) {
     );
     // Keep save-time toast behavior aligned with proactive validation.
     if (sessionCookieName && !isValidSessionCookieName(sessionCookieName)) {
-      toast.error(t('configs.auth_providers.token.session_cookie_name_invalid'));
+      toast.error(
+        t('configs.auth_providers.token.session_cookie_name_invalid')
+      );
       return false;
     }
     if (

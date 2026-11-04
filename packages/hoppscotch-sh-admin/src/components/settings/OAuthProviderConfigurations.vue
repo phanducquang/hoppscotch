@@ -15,6 +15,7 @@
 
         <div
           v-for="provider in workingConfigs.providers"
+          :key="provider.name"
           class="space-y-4 py-4"
         >
           <div class="flex justify-between">
@@ -22,7 +23,11 @@
               :on="provider.enabled"
               @change="provider.enabled = !provider.enabled"
             >
-              {{ capitalize(provider.name) }}
+              {{
+                provider.name === 'oidc'
+                  ? t('onboarding.oidc.title')
+                  : capitalize(provider.name)
+              }}
             </HoppSmartToggle>
             <HoppButtonSecondary
               v-tippy="{ theme: 'tooltip', allowHTML: true }"
@@ -35,6 +40,12 @@
           </div>
 
           <div v-if="provider.enabled" class="ml-12">
+            <p
+              v-if="provider.name === 'oidc'"
+              class="text-secondaryLight text-tiny py-2"
+            >
+              {{ t('configs.auth_providers.oidc_secret_hint') }}
+            </p>
             <div
               v-for="field in providerConfigFields"
               :key="field.key"
@@ -46,16 +57,23 @@
                 <label>{{ makeReadableKey(field.name, true) }}</label>
                 <span class="flex max-w-lg">
                   <HoppSmartInput
-                    v-model="provider.fields[field.key as keyof typeof provider['fields']]"
+                    v-model="
+                      provider.fields[
+                        field.key as keyof (typeof provider)['fields']
+                      ]
+                    "
                     :type="
                       isMasked(provider.name, field.key) ? 'password' : 'text'
                     "
                     :autofocus="false"
+                    :autocomplete="
+                      field.key === 'client_secret' ? 'new-password' : 'off'
+                    "
                     class="!my-2 !bg-primaryLight flex-1 border border-divider rounded"
                     :class="{
                       '!border-red-500': isConfigFieldErrored(
                         provider.name,
-                        field.key,
+                        field.key
                       ),
                     }"
                     input-styles="!border-0"
@@ -119,7 +137,7 @@ type ProviderFieldKeys = keyof ProviderFields;
 
 type ProviderFields = {
   [Field in keyof ServerConfigs['providers'][SsoAuthProviders]['fields']]: boolean;
-} & Partial<{ tenant: boolean }>;
+} & Partial<{ tenant: boolean; issuer: boolean; display_name: boolean }>;
 
 type ProviderFieldMetadata = {
   name: string;
@@ -129,24 +147,34 @@ type ProviderFieldMetadata = {
 
 const providerConfigFields = <ProviderFieldMetadata[]>[
   {
+    name: t('onboarding.oidc.display_name'),
+    key: 'display_name',
+    applicableProviders: ['oidc'],
+  },
+  {
+    name: t('onboarding.oidc.issuer'),
+    key: 'issuer',
+    applicableProviders: ['oidc'],
+  },
+  {
     name: t('configs.auth_providers.client_id'),
     key: 'client_id',
-    applicableProviders: ['google', 'github', 'microsoft'],
+    applicableProviders: ['google', 'github', 'microsoft', 'oidc'],
   },
   {
     name: t('configs.auth_providers.client_secret'),
     key: 'client_secret',
-    applicableProviders: ['google', 'github', 'microsoft'],
+    applicableProviders: ['google', 'github', 'microsoft', 'oidc'],
   },
   {
     name: t('configs.auth_providers.callback_url'),
     key: 'callback_url',
-    applicableProviders: ['google', 'github', 'microsoft'],
+    applicableProviders: ['google', 'github', 'microsoft', 'oidc'],
   },
   {
     name: t('configs.auth_providers.scope'),
     key: 'scope',
-    applicableProviders: ['google', 'github', 'microsoft'],
+    applicableProviders: ['google', 'github', 'microsoft', 'oidc'],
   },
   {
     name: t('configs.auth_providers.tenant'),
@@ -156,6 +184,14 @@ const providerConfigFields = <ProviderFieldMetadata[]>[
 ];
 
 const maskState = reactive<Record<SsoAuthProviders, ProviderFields>>({
+  oidc: {
+    client_id: false,
+    client_secret: true,
+    callback_url: false,
+    scope: false,
+    issuer: false,
+    display_name: false,
+  },
   google: {
     client_id: true,
     client_secret: true,

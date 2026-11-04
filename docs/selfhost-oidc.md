@@ -108,6 +108,27 @@ https://api.example.com/v1/auth/oidc?redirect_uri=https%3A%2F%2Fapp.example.com
 An external destination such as `https://attacker.example.com` is rejected
 before provider discovery begins.
 
+### Updating OIDC from Admin Settings
+
+After onboarding, open **Settings → Authentication → OAuth → OpenID Connect**.
+Enable OIDC and configure the display name, issuer, client ID, client secret,
+callback URL, and scopes. Scopes must include `openid`. The suggested callback
+uses the public backend API URL, including `/backend` when subpath access is on;
+register the exact callback with your provider.
+
+The saved client secret is never displayed. Leave it blank to retain the stored
+secret, or enter a new value to replace it. A secret must be provided when
+configuring a new provider for the first time. The backend checks the complete
+saved configuration before enabling OIDC.
+
+Use **Save Changes** and confirm to apply the settings and restart the server.
+OIDC can be enabled alongside the other authentication providers. At least one
+provider must remain enabled. Preserve `DATA_ENCRYPTION_KEY` across restarts so
+the backend can decrypt the saved secret.
+
+Run the Settings regressions with
+`pnpm --dir packages/hoppscotch-sh-admin run test:oidc`.
+
 ### Single-domain deployment with subpath access
 
 The AIO image supports OIDC with `ENABLE_SUBPATH_BASED_ACCESS=true`. Use the

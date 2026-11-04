@@ -1,10 +1,22 @@
 import { inject, provide, ref, type InjectionKey, type Ref } from 'vue';
 import { InfraConfigEnum } from './backend/graphql';
 
-export type SsoAuthProviders = 'google' | 'microsoft' | 'github';
+export type SsoAuthProviders = 'google' | 'microsoft' | 'github' | 'oidc';
 
 export type ServerConfigs = {
   providers: {
+    oidc: {
+      name: SsoAuthProviders;
+      enabled: boolean;
+      fields: {
+        display_name: string;
+        issuer: string;
+        client_id: string;
+        client_secret: string;
+        callback_url: string;
+        scope: string;
+      };
+    };
     google: {
       name: SsoAuthProviders;
       enabled: boolean;
@@ -196,6 +208,24 @@ export const GITHUB_CONFIGS: Config[] = [
   },
 ];
 
+export const OIDC_CONFIGS: Config[] = [
+  {
+    name: InfraConfigEnum.OidcDisplayName,
+    key: 'display_name',
+    optional: true,
+  },
+  { name: InfraConfigEnum.OidcIssuer, key: 'issuer' },
+  { name: InfraConfigEnum.OidcClientId, key: 'client_id' },
+  // Blank means retain the backend-only secret; enabling checks it server-side.
+  {
+    name: InfraConfigEnum.OidcClientSecret,
+    key: 'client_secret',
+    optional: true,
+  },
+  { name: InfraConfigEnum.OidcCallbackUrl, key: 'callback_url' },
+  { name: InfraConfigEnum.OidcScope, key: 'scope' },
+];
+
 export const MAIL_CONFIGS: Config[] = [
   {
     name: InfraConfigEnum.MailerSmtpUrl,
@@ -356,6 +386,7 @@ export const isValidSessionCookieName = (value: string): boolean =>
   SESSION_COOKIE_NAME_REGEX.test(value);
 
 export const ALL_CONFIGS = [
+  OIDC_CONFIGS,
   GOOGLE_CONFIGS,
   MICROSOFT_CONFIGS,
   GITHUB_CONFIGS,
@@ -445,11 +476,10 @@ const lookupEnvVar = (configs: Config[], key: string): string =>
 const emptyOrInvalidNumber = (
   value: string | boolean | number
 ): ConfigIssueKind =>
-  typeof value === 'string' && value.trim() === ''
-    ? 'empty'
-    : 'invalid-number';
+  typeof value === 'string' && value.trim() === '' ? 'empty' : 'invalid-number';
 
 const PROVIDER_CONFIGS: Record<SsoAuthProviders, Config[]> = {
+  oidc: OIDC_CONFIGS,
   google: GOOGLE_CONFIGS,
   github: GITHUB_CONFIGS,
   microsoft: MICROSOFT_CONFIGS,
@@ -468,6 +498,10 @@ export const getConfigValidationIssues = (
     if (!provider.enabled) return;
 
     Object.entries(provider.fields).forEach(([fieldKey, value]) => {
+      if (
+        PROVIDER_CONFIGS[name].find((field) => field.key === fieldKey)?.optional
+      )
+        return;
       if (isFieldEmpty(value)) {
         issues.push({
           tab: 'auth',
@@ -479,6 +513,33 @@ export const getConfigValidationIssues = (
         });
       }
     });
+    if (name === 'oidc') {
+      const fields = config.providers.oidc.fields;
+      for (const fieldKey of ['issuer', 'callback_url', 'scope'] as const) {
+        const value = fields[fieldKey];
+        if (!value.trim()) continue;
+        let valid = value.trim().split(/\s+/).includes('openid');
+        if (fieldKey !== 'scope') {
+          try {
+            valid =
+              isValidProxyUrl(value) &&
+              ['http:', 'https:'].includes(new URL(value).protocol);
+          } catch {
+            valid = false;
+          }
+        }
+        if (!valid) {
+          issues.push({
+            tab: 'auth',
+            subTab: 'auth-providers',
+            section: 'oidc',
+            fieldKey,
+            envVar: lookupEnvVar(OIDC_CONFIGS, fieldKey),
+            kind: 'invalid-format',
+          });
+        }
+      }
+    }
   });
 
   // Mail / SMTP → smtp
@@ -622,17 +683,19 @@ export const getConfigValidationIssues = (
 
   // Rate limit → rate-limit
   // Both fields are unconditionally required numerics — no enable toggle.
-  Object.entries(config.rateLimitConfigs.fields).forEach(([fieldKey, value]) => {
-    if (isNotValidNumber(value)) {
-      issues.push({
-        tab: 'rate-limit',
-        section: 'rate_limit',
-        fieldKey,
-        envVar: lookupEnvVar(RATE_LIMIT_CONFIGS, fieldKey),
-        kind: emptyOrInvalidNumber(value),
-      });
+  Object.entries(config.rateLimitConfigs.fields).forEach(
+    ([fieldKey, value]) => {
+      if (isNotValidNumber(value)) {
+        issues.push({
+          tab: 'rate-limit',
+          section: 'rate_limit',
+          fieldKey,
+          envVar: lookupEnvVar(RATE_LIMIT_CONFIGS, fieldKey),
+          kind: emptyOrInvalidNumber(value),
+        });
+      }
     }
-  });
+  );
 
   // Proxy URL → proxy
   // Required unconditionally (no enable toggle). The if/else ordering matters:

@@ -4,6 +4,7 @@
   "version": "2026.7.0",
   "type": "module",
   "scripts": {
+    "test:oidc": "pnpm --dir ../hoppscotch-common exec vitest run --config ../hoppscotch-sh-admin/vitest.config.mjs",
     "dev": "pnpm exec npm-run-all -p -l dev:*",
     "dev:vite": "vite",
     "dev:gql-codegen": "graphql-codegen --require dotenv/config --config gql-codegen.yml --watch dotenv_config_path=\"../../.env\"",
