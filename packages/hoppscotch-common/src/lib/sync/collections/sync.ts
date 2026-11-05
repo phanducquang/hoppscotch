@@ -1,6 +1,7 @@
 import {
   generateUniqueRefId,
   HoppCollection,
+  HoppGQLRequest,
   HoppRESTRequest,
 } from "@hoppscotch/data"
 
@@ -53,6 +54,8 @@ const transformCollectionForBackend = (collection: HoppCollection): any => {
     variables: stripClientLocalValuesForWire(collection.variables ?? []),
     _ref_id: collection._ref_id,
     description: collection.description ?? null,
+    preRequestScript: collection.preRequestScript ?? "",
+    testScript: collection.testScript ?? "",
   }
 
   return {
@@ -150,8 +153,7 @@ export function applyDuplicatedCollectionResult(
   exportedCollectionJSON: string
 ) {
   const parsed = JSON.parse(exportedCollectionJSON) as
-    | ExportedCollectionFolder
-    | ExportedCollectionFolder[]
+    ExportedCollectionFolder | ExportedCollectionFolder[]
 
   // The backend may return either the duplicated collection directly or wrapped
   // in an array — normalize to the single duplicated collection.
@@ -247,6 +249,8 @@ const recursivelySyncCollections = async (
       variables: stripClientLocalValuesForWire(collection.variables ?? []),
       _ref_id: collection._ref_id,
       description: collection.description ?? null,
+      preRequestScript: collection.preRequestScript ?? "",
+      testScript: collection.testScript ?? "",
     }
     const res = await createRESTRootUserCollection(
       collection.name,
@@ -293,6 +297,8 @@ const recursivelySyncCollections = async (
       variables: stripClientLocalValuesForWire(collection.variables ?? []),
       _ref_id: collection._ref_id,
       description: collection.description ?? null,
+      preRequestScript: collection.preRequestScript ?? "",
+      testScript: collection.testScript ?? "",
     }
 
     const res = await createRESTChildUserCollection(
@@ -504,6 +510,8 @@ export const storeSyncDefinition: StoreSyncDefinitionOf<
       variables: stripClientLocalValuesForWire(collection.variables),
       _ref_id: collection._ref_id,
       description: collection.description ?? null,
+      preRequestScript: collection.preRequestScript ?? "",
+      testScript: collection.testScript ?? "",
     }
 
     if (collectionID) {
@@ -601,6 +609,8 @@ export const storeSyncDefinition: StoreSyncDefinitionOf<
       variables: stripClientLocalValuesForWire(folder.variables),
       _ref_id: folder._ref_id,
       description: folder.description,
+      preRequestScript: folder.preRequestScript ?? "",
+      testScript: folder.testScript ?? "",
     }
     if (folderID) {
       updateUserCollection(folderID, folderName, JSON.stringify(data))
@@ -686,17 +696,16 @@ export const storeSyncDefinition: StoreSyncDefinitionOf<
     const request = folder.requests[requestIndex]
     if (!request) return
 
+    // Unified workspace: REST mutation handles both kinds — backend stores the request as opaque JSON in a REST row.
+    const typed = requestNew as HoppRESTRequest | HoppGQLRequest
+
     if (request.id) {
-      editUserRequest(
-        request.id,
-        (requestNew as HoppRESTRequest).name,
-        JSON.stringify(requestNew)
-      )
+      editUserRequest(request.id, typed.name, JSON.stringify(typed))
     } else {
       if (isSynced && folder.id) {
         const res = await createRESTUserRequest(
-          (requestNew as HoppRESTRequest).name,
-          JSON.stringify(requestNew),
+          typed.name,
+          JSON.stringify(typed),
           folder.id
         )
         if (res && E.isRight(res)) {
@@ -724,9 +733,11 @@ export const storeSyncDefinition: StoreSyncDefinitionOf<
     const parentCollectionBackendID = folder?.id
 
     if (parentCollectionBackendID) {
+      // See `editRequest` above — REST mutation handles both kinds.
+      const typed = request as HoppRESTRequest | HoppGQLRequest
       const res = await createRESTUserRequest(
-        (request as HoppRESTRequest).name,
-        JSON.stringify(request),
+        typed.name,
+        JSON.stringify(typed),
         parentCollectionBackendID
       )
 
@@ -907,7 +918,7 @@ export async function moveOrReorderRequests(
 
   let nextRequestBackendID: string | undefined
 
-  // we only need this for reordering requests, not for moving requests
+  // `!== undefined` (not truthy) so position-0 drops still take the reorder path.
   if (nextRequestIndex !== undefined) {
     // reordering
     const [newRequestIndex, newDestinationIndex] = getIndexesAfterReorder(
