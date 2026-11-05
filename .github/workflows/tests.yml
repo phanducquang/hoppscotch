@@ -2,9 +2,9 @@ name: Node.js CI
 
 on:
   push:
-    branches: [main, next, patch]
+    branches: [main, next, patch, feature/generic-oidc, 'integration/generic-oidc-*']
   pull_request:
-    branches: [main, next, patch]
+    branches: [main, next, patch, feature/generic-oidc]
 
 jobs:
   test:
@@ -32,14 +32,17 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v3
         with:
-          version: 10
+          version: 10.34.5
           run_install: false
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
         env:
           DATABASE_URL: postgresql://postgres:testpass@localhost:5432/hoppscotch
           DATA_ENCRYPTION_KEY: "12345678901234567890123456789012"
+
+      - name: Run Admin OIDC settings tests
+        run: pnpm --dir packages/hoppscotch-sh-admin run test:oidc
 
       - name: Run tests
         run: pnpm test
